@@ -32,3 +32,32 @@ def test_missing_required_env_raises(monkeypatch):
             agent.start()
     finally:
         agent.stop()
+
+
+def test_convert_mcp_tools_to_voice_live_format():
+    mcp_tools = [
+        {
+            "name": "relative_move",
+            "description": "Move robot by relative delta",
+            "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}}},
+        },
+        {
+            "name": "speak",  # description 欠落のケース
+            "inputSchema": {"type": "object"},
+        },
+    ]
+    result = AzureVoiceLiveAgent._convert_tools(mcp_tools)
+    assert result == [
+        {
+            "type": "function",
+            "name": "relative_move",
+            "description": "Move robot by relative delta",
+            "parameters": {"type": "object", "properties": {"x": {"type": "number"}}},
+        },
+        {
+            "type": "function",
+            "name": "speak",
+            "description": "",
+            "parameters": {"type": "object"},
+        },
+    ]

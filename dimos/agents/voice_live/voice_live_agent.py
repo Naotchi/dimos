@@ -59,6 +59,18 @@ class AzureVoiceLiveConfig(ModuleConfig):
 class AzureVoiceLiveAgent(Module):
     config: AzureVoiceLiveConfig
 
+    @staticmethod
+    def _convert_tools(mcp_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t["inputSchema"],
+            }
+            for t in mcp_tools
+        ]
+
     @rpc
     def start(self) -> None:
         super().start()
