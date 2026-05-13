@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from collections.abc import Callable
 from typing import Any
@@ -60,10 +61,28 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
         self._audio_out_subject: Subject[AudioEvent] = Subject()
         self._audio_in_subject: Subject[AudioEvent] | None = None
         self._ws = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def consume_audio(self, audio_observable: Observable) -> "AzureVoiceLiveNode":
         self._audio_in_subject = audio_observable  # type: ignore[assignment]
         return self
+
+    def _activate_audio_input(self) -> None:
+        """Subscribe to incoming audio observable and forward to WS."""
+        if self._audio_in_subject is None:
+            return
+
+        def _on_audio(event: AudioEvent) -> None:
+            pcm = event.to_int16().data.tobytes()
+            payload = {
+                "type": "input_audio_buffer.append",
+                "audio": base64.b64encode(pcm).decode("ascii"),
+            }
+            if self._ws is None or self._loop is None:
+                return
+            asyncio.run_coroutine_threadsafe(self._ws.send(json.dumps(payload)), self._loop)
+
+        self._audio_in_subject.subscribe(on_next=_on_audio)  # type: ignore[union-attr]
 
     def emit_audio(self) -> Observable:
         return self._audio_out_subject
@@ -73,6 +92,8 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
         headers = {"api-key": self.api_key}
         async with websockets.connect(self.endpoint, additional_headers=headers) as ws:
             self._ws = ws
+            self._loop = asyncio.get_running_loop()
+            self._activate_audio_input()
             session_payload = {
                 "type": "session.update",
                 "session": {

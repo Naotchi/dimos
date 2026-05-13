@@ -1,10 +1,14 @@
 import asyncio
+import base64
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
+import reactivex as rx
 
 from dimos.agents.voice_live.voice_live_node import AzureVoiceLiveNode
+from dimos.stream.audio.base import AudioEvent
 
 
 def test_node_constructor_stores_config():
@@ -65,3 +69,35 @@ async def test_start_connects_and_sends_session_update():
     assert session["voice"] == "ja-JP-NanamiNeural"
     assert session["instructions"] == "日本語で話して"
     assert session["tools"] == [{"type": "function", "name": "move", "description": "move", "parameters": {}}]
+
+
+@pytest.mark.asyncio
+async def test_audio_in_chunks_forwarded_as_input_audio_buffer_append():
+    sent_messages: list[str] = []
+    mock_ws = AsyncMock()
+    mock_ws.send = AsyncMock(side_effect=lambda msg: sent_messages.append(msg))
+
+    node = AzureVoiceLiveNode(
+        endpoint="wss://example", api_key="k", model="m", voice="v",
+        instructions="", tools=[], on_tool_call=lambda *a: None,
+    )
+    node._ws = mock_ws
+    node._loop = asyncio.get_event_loop()
+
+    audio = AudioEvent(
+        data=np.array([0, 100, -100], dtype=np.int16),
+        sample_rate=24000,
+        timestamp=0.0,
+    )
+    # consume_audio should subscribe to source and forward chunks
+    subject: rx.subject.Subject[AudioEvent] = rx.subject.Subject()
+    node.consume_audio(subject)
+    node._activate_audio_input()  # bridge subject to WS sender
+
+    subject.on_next(audio)
+    await asyncio.sleep(0.05)  # let async task run
+
+    appends = [json.loads(m) for m in sent_messages if json.loads(m).get("type") == "input_audio_buffer.append"]
+    assert len(appends) == 1
+    decoded = base64.b64decode(appends[0]["audio"])
+    assert len(decoded) == 6  # 3 int16 samples = 6 bytes
