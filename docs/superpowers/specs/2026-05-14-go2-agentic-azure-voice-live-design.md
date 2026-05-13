@@ -165,12 +165,7 @@ __all__ = ["unitree_go2_agentic_voice_live"]
 
 ### 6. `pyproject.toml`
 
-Voice Live クライアントに必要な依存を追加:
-
-- `websockets` (WS クライアント、未追加なら)
-- `aiohttp` または同等（必要なら）
-
-`[project.optional-dependencies]` の `unitree` または専用グループ（例: `voice-live`）に入れる。既存パターンに合わせて決定。
+`agents` グループに `websockets>=13` を追加（現状未登録、Azure Voice Live への WS 接続に使用）。HTTP は既存の `httpx`（mcp 経由で既に入っている）を使用するため追加不要。
 
 ## 設定（環境変数まとめ）
 
