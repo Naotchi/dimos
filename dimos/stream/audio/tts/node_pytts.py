@@ -16,9 +16,7 @@
 import pyttsx3  # type: ignore[import-not-found]
 from reactivex import Observable, Subject
 
-from dimos.stream.audio.text.abstract import (  # type: ignore[import-untyped]
-    AbstractTextTransform,
-)
+from dimos.stream.audio.text.base import AbstractTextTransform
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
