@@ -13,6 +13,13 @@ import pytest
 from reactivex import Subject
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_pyopenjtalk_modules():
+    yield
+    sys.modules.pop("pyopenjtalk", None)
+    sys.modules.pop("dimos.stream.audio.tts.node_open_jtalk", None)
+
+
 def _install_fake_pyopenjtalk() -> mock.MagicMock:
     """Install a fake pyopenjtalk module before import."""
     fake = types.ModuleType("pyopenjtalk")
@@ -91,8 +98,6 @@ def test_synthesis_error_is_logged_and_does_not_kill_worker() -> None:
     fake = types.ModuleType("pyopenjtalk")
     fake.tts = mock.MagicMock(side_effect=RuntimeError("boom"))  # type: ignore[attr-defined]
     sys.modules["pyopenjtalk"] = fake
-    # Force reimport so the production module picks up the new fake.
-    sys.modules.pop("dimos.stream.audio.tts.node_open_jtalk", None)
 
     from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 

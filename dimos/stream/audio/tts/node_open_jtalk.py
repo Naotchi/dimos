@@ -80,7 +80,7 @@ class OpenJTalkTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextE
 
     def _synthesize_speech(self, text: str) -> None:
         try:
-            waveform, sample_rate = pyopenjtalk.tts(text)
+            waveform, _ = pyopenjtalk.tts(text)
             self.text_subject.on_next(text)
             audio_event = AudioEvent(
                 data=waveform,
@@ -88,7 +88,6 @@ class OpenJTalkTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextE
                 timestamp=time.time(),
                 channels=1,
             )
-            logger.debug(f"OpenJTalk audio sample rate: {sample_rate}Hz")
             self.audio_subject.on_next(audio_event)
         except Exception as e:
             logger.error(f"Error synthesizing speech: {e}")
