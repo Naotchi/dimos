@@ -123,3 +123,26 @@ async def test_response_audio_delta_emits_audio_event():
     assert received[0].sample_rate == 24000
     assert received[0].data.dtype == np.int16
     assert received[0].data.tolist() == [0, 256, -256]
+
+
+@pytest.mark.asyncio
+async def test_function_call_arguments_done_invokes_handler():
+    calls: list[tuple[str, str, str]] = []
+
+    def handler(call_id: str, name: str, args_json: str) -> None:
+        calls.append((call_id, name, args_json))
+
+    node = AzureVoiceLiveNode(
+        endpoint="wss://example", api_key="k", model="m", voice="v",
+        instructions="", tools=[], on_tool_call=handler,
+    )
+
+    raw = json.dumps({
+        "type": "response.function_call_arguments.done",
+        "call_id": "call_123",
+        "name": "relative_move",
+        "arguments": '{"x": 1.0, "y": 0}',
+    })
+    await node._handle_message(raw)
+
+    assert calls == [("call_123", "relative_move", '{"x": 1.0, "y": 0}')]

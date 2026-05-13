@@ -129,3 +129,8 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
                 timestamp=0.0,
             )
             self._audio_out_subject.on_next(event)
+        elif mtype == "response.function_call_arguments.done":
+            try:
+                self.on_tool_call(msg["call_id"], msg["name"], msg["arguments"])
+            except Exception:
+                logger.exception("on_tool_call handler raised")
