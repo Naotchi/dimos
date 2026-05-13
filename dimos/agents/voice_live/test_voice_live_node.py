@@ -170,3 +170,23 @@ async def test_send_function_output_emits_correct_messages():
     assert item["type"] == "function_call_output"
     assert item["call_id"] == "call_42"
     assert item["output"] == "Moved 1m forward"
+
+
+@pytest.mark.asyncio
+async def test_start_retries_on_connect_failure_then_gives_up():
+    attempts: list[int] = []
+
+    async def fake_connect(*args, **kwargs):
+        attempts.append(len(attempts) + 1)
+        raise ConnectionError("nope")
+
+    node = AzureVoiceLiveNode(
+        endpoint="wss://example", api_key="k", model="m", voice="v",
+        instructions="", tools=[], on_tool_call=lambda *a: None,
+        max_retries=3, backoff_base=0.0,
+    )
+    with patch("dimos.agents.voice_live.voice_live_node.websockets.connect", side_effect=fake_connect):
+        with pytest.raises(ConnectionError):
+            await node._run()
+
+    assert len(attempts) == 3

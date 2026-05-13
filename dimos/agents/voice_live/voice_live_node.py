@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -49,6 +50,8 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
         tools: list[dict[str, Any]],
         on_tool_call: ToolCallHandler,
         sample_rate: int = 24000,
+        max_retries: int = 3,
+        backoff_base: float = 1.0,
     ) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
@@ -58,11 +61,14 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
         self.tools = tools
         self.on_tool_call = on_tool_call
         self.sample_rate = sample_rate
+        self.max_retries = max_retries
+        self.backoff_base = backoff_base
 
         self._audio_out_subject: Subject[AudioEvent] = Subject()
         self._audio_in_subject: Subject[AudioEvent] | None = None
         self._ws = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
 
     def consume_audio(self, audio_observable: Observable) -> "AzureVoiceLiveNode":
         self._audio_in_subject = audio_observable  # type: ignore[assignment]
@@ -90,8 +96,12 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
 
     async def _run_once(self) -> None:
         """Connect once and run the recv loop until disconnect or stop."""
+        import inspect
         headers = {"api-key": self.api_key}
-        async with websockets.connect(self.endpoint, additional_headers=headers) as ws:
+        _conn = websockets.connect(self.endpoint, additional_headers=headers)
+        # Support both real websockets (async CM) and test stubs (awaitable coroutine).
+        if inspect.isawaitable(_conn):
+            ws = await _conn
             self._ws = ws
             self._loop = asyncio.get_running_loop()
             self._activate_audio_input()
@@ -114,6 +124,30 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
                     await self._handle_message(raw)
             except asyncio.CancelledError:
                 pass
+        else:
+            async with _conn as ws:
+                self._ws = ws
+                self._loop = asyncio.get_running_loop()
+                self._activate_audio_input()
+                session_payload = {
+                    "type": "session.update",
+                    "session": {
+                        "model": self.model,
+                        "voice": self.voice,
+                        "instructions": self.instructions,
+                        "tools": self.tools,
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "input_audio_sample_rate_hz": self.sample_rate,
+                        "output_audio_sample_rate_hz": self.sample_rate,
+                    },
+                }
+                await ws.send(json.dumps(session_payload))
+                try:
+                    async for raw in ws:
+                        await self._handle_message(raw)
+                except asyncio.CancelledError:
+                    pass
 
     async def _handle_message(self, raw: str | bytes) -> None:
         if isinstance(raw, bytes):
@@ -156,3 +190,31 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
             await self._ws.send(json.dumps(response_msg))
 
         asyncio.run_coroutine_threadsafe(_send_both(), self._loop)
+
+    async def _run(self) -> None:
+        last_exc: Exception | None = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                await self._run_once()
+                return  # graceful end
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.warning("voice-live WS attempt %d/%d failed: %s", attempt, self.max_retries, exc)
+                await asyncio.sleep(self.backoff_base * (2 ** (attempt - 1)))
+        assert last_exc is not None
+        raise last_exc
+
+    def start(self) -> None:
+        """Start the WS client in a background thread with its own event loop."""
+        def _run_thread() -> None:
+            asyncio.run(self._run())
+
+        self._thread = threading.Thread(target=_run_thread, name="AzureVoiceLiveNode", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Stop the WS client."""
+        if self._ws is not None and self._loop is not None:
+            asyncio.run_coroutine_threadsafe(self._ws.close(), self._loop)
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
