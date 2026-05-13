@@ -218,6 +218,18 @@ dimos stop                                # Shut down
 
 > Full CLI reference: [docs/usage/cli.md](docs/usage/cli.md)
 
+### Environment variables (`unitree-go2-agentic`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `DIMOS_LLM_MODEL` | `gpt-4o` | LangChain model string. Examples: `gpt-4o`, `ollama:qwen3:8b`, `anthropic:claude-opus-4-5` |
+| `DIMOS_TTS` | `pyttsx3` | TTS backend: `openai` (cloud) or `pyttsx3` (local). `pyttsx3` requires `espeak`/`libespeak1` on Linux. |
+
+Example: fully local stack (no OpenAI key required):
+
+```sh
+DIMOS_LLM_MODEL=ollama:qwen3:8b dimos run unitree-go2-agentic
+```
 
 # Usage
 
