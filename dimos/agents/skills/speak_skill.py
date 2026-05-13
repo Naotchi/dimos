@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import threading
 import time
 
@@ -23,13 +24,14 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
+from dimos.stream.audio.tts.node_pytts import PyTTSNode
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
 
 class SpeakSkill(Module):
-    _tts_node: OpenAITTSNode | None = None
+    _tts_node: OpenAITTSNode | PyTTSNode | None = None
     _audio_output: SounddeviceAudioOutput | None = None
     _audio_lock: threading.Lock = threading.Lock()
     _bg_threads: list[threading.Thread] = []
@@ -38,9 +40,18 @@ class SpeakSkill(Module):
     @rpc
     def start(self) -> None:
         super().start()
-        self._tts_node = OpenAITTSNode(speed=1.2, voice=Voice.ONYX)
-        self._audio_output = SounddeviceAudioOutput(sample_rate=24000)
-        self._audio_output.consume_audio(self._tts_node.emit_audio())
+        backend = os.environ.get("DIMOS_TTS", "pyttsx3").lower()
+        if backend == "openai":
+            self._tts_node = OpenAITTSNode(speed=1.2, voice=Voice.ONYX)
+            self._audio_output = SounddeviceAudioOutput(sample_rate=24000)
+            self._audio_output.consume_audio(self._tts_node.emit_audio())
+        elif backend == "pyttsx3":
+            self._tts_node = PyTTSNode()
+            self._audio_output = None
+        else:
+            raise ValueError(
+                f"DIMOS_TTS must be 'openai' or 'pyttsx3', got: {backend!r}"
+            )
 
     @rpc
     def stop(self) -> None:
