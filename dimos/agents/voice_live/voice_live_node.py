@@ -14,9 +14,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import Callable
 from typing import Any
 
+import websockets
 from reactivex import Observable, Subject
 
 from dimos.stream.audio.base import AbstractAudioConsumer, AbstractAudioEmitter, AudioEvent
@@ -56,6 +59,7 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
 
         self._audio_out_subject: Subject[AudioEvent] = Subject()
         self._audio_in_subject: Subject[AudioEvent] | None = None
+        self._ws = None
 
     def consume_audio(self, audio_observable: Observable) -> "AzureVoiceLiveNode":
         self._audio_in_subject = audio_observable  # type: ignore[assignment]
@@ -63,3 +67,32 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
 
     def emit_audio(self) -> Observable:
         return self._audio_out_subject
+
+    async def _run_once(self) -> None:
+        """Connect once and run the recv loop until disconnect or stop."""
+        headers = {"api-key": self.api_key}
+        async with websockets.connect(self.endpoint, additional_headers=headers) as ws:
+            self._ws = ws
+            session_payload = {
+                "type": "session.update",
+                "session": {
+                    "model": self.model,
+                    "voice": self.voice,
+                    "instructions": self.instructions,
+                    "tools": self.tools,
+                    "input_audio_format": "pcm16",
+                    "output_audio_format": "pcm16",
+                    "input_audio_sample_rate_hz": self.sample_rate,
+                    "output_audio_sample_rate_hz": self.sample_rate,
+                },
+            }
+            await ws.send(json.dumps(session_payload))
+            try:
+                async for raw in ws:
+                    await self._handle_message(raw)
+            except asyncio.CancelledError:
+                pass
+
+    async def _handle_message(self, raw: str | bytes) -> None:
+        """Handle a single WS message. Filled in by later tasks."""
+        return None
