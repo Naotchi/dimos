@@ -16,6 +16,7 @@
 import threading
 import time
 
+import numpy as np
 import pyopenjtalk  # type: ignore[import-not-found]
 from reactivex import Observable, Subject
 
@@ -82,8 +83,10 @@ class OpenJTalkTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextE
         try:
             waveform, _ = pyopenjtalk.tts(text)
             self.text_subject.on_next(text)
+            # pyopenjtalk returns float64 in int16 amplitude range;
+            # cast to int16 so SounddeviceAudioOutput's to_float32 normalizes correctly.
             audio_event = AudioEvent(
-                data=waveform,
+                data=waveform.astype(np.int16),
                 sample_rate=SAMPLE_RATE,
                 timestamp=time.time(),
                 channels=1,

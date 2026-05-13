@@ -23,9 +23,13 @@ def _cleanup_pyopenjtalk_modules():
 
 
 def _install_fake_pyopenjtalk() -> mock.MagicMock:
-    """Install a fake pyopenjtalk module before import."""
+    """Install a fake pyopenjtalk module before import.
+
+    Returns a tts mock whose return value is float64 in int16 amplitude range,
+    matching pyopenjtalk's real output (so dtype-conversion behaviour is tested).
+    """
     fake = types.ModuleType("pyopenjtalk")
-    waveform = np.zeros(4800, dtype=np.float64)
+    waveform = np.full(4800, 12345.0, dtype=np.float64)
     tts_mock = mock.MagicMock(return_value=(waveform, 48000))
     fake.tts = tts_mock  # type: ignore[attr-defined]
     sys.modules["pyopenjtalk"] = fake
@@ -59,6 +63,8 @@ def test_consume_text_emits_audio_event() -> None:
     assert event.sample_rate == 48000
     assert event.channels == 1
     assert isinstance(event.data, np.ndarray)
+    assert event.data.dtype == np.int16
+    assert event.data[0] == 12345
     tts_mock.assert_called_once_with("こんにちは")
 
     node.dispose()
