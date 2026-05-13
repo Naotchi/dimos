@@ -19,8 +19,13 @@ from typing import Any
 
 from pydantic import Field
 
+from dimos.agents.mcp.mcp_adapter import McpAdapter
+from dimos.agents.voice_live.japanese_prompt import JAPANESE_SYSTEM_PROMPT
+from dimos.agents.voice_live.voice_live_node import AzureVoiceLiveNode
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
+from dimos.stream.audio.node_microphone import SounddeviceAudioSource
+from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
@@ -74,6 +79,35 @@ class AzureVoiceLiveAgent(Module):
     @rpc
     def start(self) -> None:
         super().start()
-        missing = [name for name in _REQUIRED_ENVS if not getattr(self.config, _env_to_field(name))]
+        cfg = self.config
+        missing = [name for name in _REQUIRED_ENVS if not getattr(cfg, _env_to_field(name))]
         if missing:
             raise ValueError(f"Missing required env vars: {', '.join(missing)}")
+
+        self._mcp = McpAdapter(url=cfg.mcp_server_url)
+        if not self._mcp.wait_for_ready(timeout=30.0):
+            raise TimeoutError(f"MCP server not ready at {cfg.mcp_server_url}")
+        mcp_tools = self._mcp.list_tools()
+        voice_live_tools = self._convert_tools(mcp_tools)
+
+        self._mic = SounddeviceAudioSource(
+            device_index=cfg.mic_device_index, sample_rate=24000
+        )
+        self._speaker = SounddeviceAudioOutput(sample_rate=24000)
+
+        self._node = AzureVoiceLiveNode(
+            endpoint=cfg.endpoint,
+            api_key=cfg.api_key,
+            model=cfg.model,
+            voice=cfg.voice,
+            instructions=JAPANESE_SYSTEM_PROMPT,
+            tools=voice_live_tools,
+            on_tool_call=self._handle_tool_call,
+        )
+        self._node.consume_audio(self._mic.emit_audio())
+        self._speaker.consume_audio(self._node.emit_audio())
+        self._node.start()
+
+    def _handle_tool_call(self, call_id: str, name: str, args_json: str) -> None:
+        """Filled in by Task 13."""
+        return None
