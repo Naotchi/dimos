@@ -101,3 +101,25 @@ async def test_audio_in_chunks_forwarded_as_input_audio_buffer_append():
     assert len(appends) == 1
     decoded = base64.b64decode(appends[0]["audio"])
     assert len(decoded) == 6  # 3 int16 samples = 6 bytes
+
+
+@pytest.mark.asyncio
+async def test_response_audio_delta_emits_audio_event():
+    received: list[AudioEvent] = []
+    node = AzureVoiceLiveNode(
+        endpoint="wss://example", api_key="k", model="m", voice="v",
+        instructions="", tools=[], on_tool_call=lambda *a: None,
+    )
+    node.emit_audio().subscribe(on_next=received.append)
+
+    pcm = np.array([0, 256, -256], dtype=np.int16).tobytes()
+    raw = json.dumps({
+        "type": "response.audio.delta",
+        "delta": base64.b64encode(pcm).decode("ascii"),
+    })
+    await node._handle_message(raw)
+
+    assert len(received) == 1
+    assert received[0].sample_rate == 24000
+    assert received[0].data.dtype == np.int16
+    assert received[0].data.tolist() == [0, 256, -256]

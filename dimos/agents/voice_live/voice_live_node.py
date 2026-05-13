@@ -20,6 +20,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import websockets
 from reactivex import Observable, Subject
 
@@ -115,5 +116,16 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
                 pass
 
     async def _handle_message(self, raw: str | bytes) -> None:
-        """Handle a single WS message. Filled in by later tasks."""
-        return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        msg = json.loads(raw)
+        mtype = msg.get("type")
+        if mtype == "response.audio.delta":
+            pcm_bytes = base64.b64decode(msg["delta"])
+            data = np.frombuffer(pcm_bytes, dtype=np.int16)
+            event = AudioEvent(
+                data=data,
+                sample_rate=self.sample_rate,
+                timestamp=0.0,
+            )
+            self._audio_out_subject.on_next(event)
