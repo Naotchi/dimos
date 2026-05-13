@@ -1885,6 +1885,7 @@ agents = [
     { name = "ollama" },
     { name = "openai" },
     { name = "sounddevice" },
+    { name = "websockets" },
 ]
 all = [
     { name = "anthropic" },
@@ -1979,6 +1980,7 @@ all = [
     { name = "ultralytics" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "uvicorn" },
+    { name = "websockets" },
     { name = "xacro" },
     { name = "xarm-python-sdk" },
     { name = "xformers", marker = "platform_machine == 'x86_64'" },
@@ -2009,6 +2011,7 @@ base = [
     { name = "soundfile" },
     { name = "sse-starlette" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 cpu = [
     { name = "ctransformers" },
@@ -2131,6 +2134,7 @@ unitree = [
     { name = "sse-starlette" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 unitree-dds = [
     { name = "anthropic" },
@@ -2156,6 +2160,7 @@ unitree-dds = [
     { name = "unitree-sdk2py-dimos" },
     { name = "unitree-webrtc-connect-leshy" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 visualization = [
     { name = "dimos-viewer" },
@@ -2450,6 +2455,7 @@ requires-dist = [
     { name = "unitree-sdk2py-dimos", marker = "extra == 'unitree-dds'", specifier = ">=1.0.2" },
     { name = "unitree-webrtc-connect-leshy", marker = "extra == 'unitree'", specifier = ">=2.0.7" },
     { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.34.0" },
+    { name = "websockets", marker = "extra == 'agents'", specifier = ">=13" },
     { name = "xacro", marker = "extra == 'manipulation'" },
     { name = "xarm-python-sdk", marker = "extra == 'manipulation'", specifier = ">=1.17.0" },
     { name = "xarm-python-sdk", marker = "extra == 'misc'", specifier = ">=1.17.0" },
