@@ -89,3 +89,30 @@ def test_start_pyttsx3_default_voice_lang_is_none(pytts_cls: mock.MagicMock) -> 
         pytts_cls.assert_called_once_with(voice_lang=None)
     finally:
         skill.stop()
+
+
+@mock.patch.dict(os.environ, {"DIMOS_TTS": "open_jtalk"}, clear=False)
+@mock.patch("dimos.agents.skills.speak_skill.SounddeviceAudioOutput")
+def test_start_open_jtalk_uses_open_jtalk_node(sd_cls: mock.MagicMock) -> None:
+    sd_cls.return_value = mock.MagicMock()
+    with mock.patch(
+        "dimos.stream.audio.tts.node_open_jtalk.OpenJTalkTTSNode"
+    ) as node_cls:
+        node_cls.return_value = mock.MagicMock()
+        skill = _make_skill()
+        try:
+            skill.start()
+            node_cls.assert_called_once_with()
+            sd_cls.assert_called_once_with(sample_rate=48000)
+        finally:
+            skill.stop()
+
+
+@mock.patch.dict(os.environ, {"DIMOS_TTS": "bogus"}, clear=False)
+def test_start_invalid_env_message_lists_open_jtalk() -> None:
+    skill = _make_skill()
+    try:
+        with pytest.raises(ValueError, match="open_jtalk"):
+            skill.start()
+    finally:
+        skill.stop()

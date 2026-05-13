@@ -15,6 +15,7 @@
 import os
 import threading
 import time
+from typing import Any
 
 from reactivex import Subject
 
@@ -36,7 +37,7 @@ class SpeakSkillConfig(ModuleConfig):
 
 class SpeakSkill(Module):
     config: SpeakSkillConfig
-    _tts_node: OpenAITTSNode | PyTTSNode | None = None
+    _tts_node: OpenAITTSNode | PyTTSNode | Any = None
     _audio_output: SounddeviceAudioOutput | None = None
     _audio_lock: threading.Lock = threading.Lock()
     _bg_threads: list[threading.Thread] = []
@@ -53,9 +54,15 @@ class SpeakSkill(Module):
         elif backend == "pyttsx3":
             self._tts_node = PyTTSNode(voice_lang=self.config.voice_lang)
             self._audio_output = None
+        elif backend == "open_jtalk":
+            from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
+
+            self._tts_node = OpenJTalkTTSNode()
+            self._audio_output = SounddeviceAudioOutput(sample_rate=48000)
+            self._audio_output.consume_audio(self._tts_node.emit_audio())
         else:
             raise ValueError(
-                f"DIMOS_TTS must be 'openai' or 'pyttsx3', got: {backend!r}"
+                f"DIMOS_TTS must be 'openai', 'pyttsx3', or 'open_jtalk', got: {backend!r}"
             )
 
     @rpc
