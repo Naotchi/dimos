@@ -15,6 +15,8 @@ from reactivex import Subject
 
 @pytest.fixture(autouse=True)
 def _cleanup_pyopenjtalk_modules():
+    sys.modules.pop("pyopenjtalk", None)
+    sys.modules.pop("dimos.stream.audio.tts.node_open_jtalk", None)
     yield
     sys.modules.pop("pyopenjtalk", None)
     sys.modules.pop("dimos.stream.audio.tts.node_open_jtalk", None)
