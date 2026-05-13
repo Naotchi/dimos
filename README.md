@@ -223,9 +223,9 @@ dimos stop                                # Shut down
 | Variable | Default | Description |
 |---|---|---|
 | `DIMOS_LLM_MODEL` | `gpt-4o` | LangChain model string. Examples: `gpt-4o`, `ollama:qwen3:8b`, `anthropic:claude-opus-4-5` |
-| `DIMOS_TTS` | `pyttsx3` | TTS backend: `openai` (cloud) or `pyttsx3` (local). `pyttsx3` requires `espeak`/`libespeak1` on Linux. |
+| `DIMOS_TTS` | `pyttsx3` | TTS backend: `openai` (cloud), `pyttsx3` (local), or `open_jtalk` (local Japanese via `pyopenjtalk`). `pyttsx3` requires `espeak`/`libespeak1` on Linux. |
 
-> **Japanese (`unitree-go2-agentic`):** This blueprint runs in Japanese by default — STT, LLM responses, and speaker output. For `DIMOS_TTS=pyttsx3` you need a Japanese voice installed on the host (Linux: `sudo apt install espeak-ng mbrola mbrola-jp1`). For higher quality, set `DIMOS_TTS=openai` (no extra setup needed).
+> **Japanese (`unitree-go2-agentic`):** This blueprint runs in Japanese by default — STT, LLM responses, and speaker output. The simplest local option is `DIMOS_TTS=open_jtalk` — `pip install pyopenjtalk` ships the Mei HTS voice and needs no OS-level setup. Alternatively, `DIMOS_TTS=pyttsx3` requires a Japanese voice on the host (Linux: `sudo apt install espeak-ng mbrola mbrola-jp1`), and `DIMOS_TTS=openai` uses the cloud (no extra setup).
 
 Example: fully local stack (no OpenAI key required):
 
