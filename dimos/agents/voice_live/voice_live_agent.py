@@ -119,9 +119,14 @@ class AzureVoiceLiveAgent(Module):
         self._speaker.consume_audio(self._node.emit_audio())
         self._node.start()
 
+    @rpc
     def stop(self) -> None:
+        if self._node is not None:
+            self._node.stop()
+        if self._speaker is not None:
+            self._speaker.stop()
         if self._executor is not None:
-            self._executor.shutdown(wait=True)
+            self._executor.shutdown(wait=True, cancel_futures=True)
             self._executor = None
         super().stop()
 

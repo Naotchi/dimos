@@ -141,3 +141,22 @@ def test_handle_tool_call_returns_error_text_on_exception():
         assert "boom" in args[1]
     finally:
         agent.stop()
+
+
+def test_stop_cleans_up_node_audio_executor():
+    agent = AzureVoiceLiveAgent()
+    agent._node = MagicMock()
+    agent._speaker = MagicMock()
+    agent._mic = MagicMock()
+    from concurrent.futures import ThreadPoolExecutor
+    agent._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="VoiceLiveTestStop")
+
+    captured_executor = agent._executor
+
+    agent.stop()
+
+    agent._node.stop.assert_called_once()
+    agent._speaker.stop.assert_called_once()
+    # executor was shut down (we can't easily assert on the shutdown call directly since
+    # the executor is set to None after; but we can verify state is cleaned).
+    assert agent._executor is None
