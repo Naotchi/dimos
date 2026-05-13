@@ -134,3 +134,25 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
                 self.on_tool_call(msg["call_id"], msg["name"], msg["arguments"])
             except Exception:
                 logger.exception("on_tool_call handler raised")
+
+    def send_function_output(self, call_id: str, output: str) -> None:
+        """Return a tool-call result to the LLM and prompt continuation."""
+        if self._ws is None or self._loop is None:
+            logger.warning("send_function_output called before WS ready; dropping")
+            return
+
+        item_msg = {
+            "type": "conversation.item.create",
+            "item": {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output,
+            },
+        }
+        response_msg = {"type": "response.create"}
+
+        async def _send_both() -> None:
+            await self._ws.send(json.dumps(item_msg))
+            await self._ws.send(json.dumps(response_msg))
+
+        asyncio.run_coroutine_threadsafe(_send_both(), self._loop)

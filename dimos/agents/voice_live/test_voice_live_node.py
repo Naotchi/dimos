@@ -146,3 +146,27 @@ async def test_function_call_arguments_done_invokes_handler():
     await node._handle_message(raw)
 
     assert calls == [("call_123", "relative_move", '{"x": 1.0, "y": 0}')]
+
+
+@pytest.mark.asyncio
+async def test_send_function_output_emits_correct_messages():
+    sent: list[str] = []
+    mock_ws = AsyncMock()
+    mock_ws.send = AsyncMock(side_effect=lambda m: sent.append(m))
+
+    node = AzureVoiceLiveNode(
+        endpoint="wss://example", api_key="k", model="m", voice="v",
+        instructions="", tools=[], on_tool_call=lambda *a: None,
+    )
+    node._ws = mock_ws
+    node._loop = asyncio.get_event_loop()
+
+    node.send_function_output("call_42", "Moved 1m forward")
+    await asyncio.sleep(0.05)
+
+    types = [json.loads(s)["type"] for s in sent]
+    assert types == ["conversation.item.create", "response.create"]
+    item = json.loads(sent[0])["item"]
+    assert item["type"] == "function_call_output"
+    assert item["call_id"] == "call_42"
+    assert item["output"] == "Moved 1m forward"
