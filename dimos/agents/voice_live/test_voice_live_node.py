@@ -176,7 +176,7 @@ async def test_send_function_output_emits_correct_messages():
 async def test_start_retries_on_connect_failure_then_gives_up():
     attempts: list[int] = []
 
-    async def fake_connect(*args, **kwargs):
+    def fake_connect(*args, **kwargs):
         attempts.append(len(attempts) + 1)
         raise ConnectionError("nope")
 

@@ -96,12 +96,8 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
 
     async def _run_once(self) -> None:
         """Connect once and run the recv loop until disconnect or stop."""
-        import inspect
         headers = {"api-key": self.api_key}
-        _conn = websockets.connect(self.endpoint, additional_headers=headers)
-        # Support both real websockets (async CM) and test stubs (awaitable coroutine).
-        if inspect.isawaitable(_conn):
-            ws = await _conn
+        async with websockets.connect(self.endpoint, additional_headers=headers) as ws:
             self._ws = ws
             self._loop = asyncio.get_running_loop()
             self._activate_audio_input()
@@ -124,30 +120,6 @@ class AzureVoiceLiveNode(AbstractAudioConsumer, AbstractAudioEmitter):
                     await self._handle_message(raw)
             except asyncio.CancelledError:
                 pass
-        else:
-            async with _conn as ws:
-                self._ws = ws
-                self._loop = asyncio.get_running_loop()
-                self._activate_audio_input()
-                session_payload = {
-                    "type": "session.update",
-                    "session": {
-                        "model": self.model,
-                        "voice": self.voice,
-                        "instructions": self.instructions,
-                        "tools": self.tools,
-                        "input_audio_format": "pcm16",
-                        "output_audio_format": "pcm16",
-                        "input_audio_sample_rate_hz": self.sample_rate,
-                        "output_audio_sample_rate_hz": self.sample_rate,
-                    },
-                }
-                await ws.send(json.dumps(session_payload))
-                try:
-                    async for raw in ws:
-                        await self._handle_message(raw)
-                except asyncio.CancelledError:
-                    pass
 
     async def _handle_message(self, raw: str | bytes) -> None:
         if isinstance(raw, bytes):
