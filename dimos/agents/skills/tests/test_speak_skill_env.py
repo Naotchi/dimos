@@ -65,3 +65,27 @@ def test_start_default_is_pyttsx3(pytts_cls) -> None:
         pytts_cls.assert_called_once()
     finally:
         skill.stop()
+
+
+@mock.patch.dict(os.environ, {"DIMOS_TTS": "pyttsx3"}, clear=False)
+@mock.patch("dimos.agents.skills.speak_skill.PyTTSNode")
+def test_start_pyttsx3_forwards_voice_lang(pytts_cls: mock.MagicMock) -> None:
+    pytts_cls.return_value = mock.MagicMock(spec=PyTTSNode)
+    skill = SpeakSkill(voice_lang="ja")
+    try:
+        skill.start()
+        pytts_cls.assert_called_once_with(voice_lang="ja")
+    finally:
+        skill.stop()
+
+
+@mock.patch.dict(os.environ, {"DIMOS_TTS": "pyttsx3"}, clear=False)
+@mock.patch("dimos.agents.skills.speak_skill.PyTTSNode")
+def test_start_pyttsx3_default_voice_lang_is_none(pytts_cls: mock.MagicMock) -> None:
+    pytts_cls.return_value = mock.MagicMock(spec=PyTTSNode)
+    skill = SpeakSkill()
+    try:
+        skill.start()
+        pytts_cls.assert_called_once_with(voice_lang=None)
+    finally:
+        skill.stop()

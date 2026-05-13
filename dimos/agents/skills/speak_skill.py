@@ -21,7 +21,7 @@ from reactivex import Subject
 from dimos.agents.annotation import skill
 from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
-from dimos.core.module import Module
+from dimos.core.module import Module, ModuleConfig
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
 from dimos.stream.audio.tts.node_pytts import PyTTSNode
@@ -30,7 +30,12 @@ from dimos.utils.logging_config import setup_logger
 logger = setup_logger()
 
 
+class SpeakSkillConfig(ModuleConfig):
+    voice_lang: str | None = None
+
+
 class SpeakSkill(Module):
+    config: SpeakSkillConfig
     _tts_node: OpenAITTSNode | PyTTSNode | None = None
     _audio_output: SounddeviceAudioOutput | None = None
     _audio_lock: threading.Lock = threading.Lock()
@@ -46,7 +51,7 @@ class SpeakSkill(Module):
             self._audio_output = SounddeviceAudioOutput(sample_rate=24000)
             self._audio_output.consume_audio(self._tts_node.emit_audio())
         elif backend == "pyttsx3":
-            self._tts_node = PyTTSNode()
+            self._tts_node = PyTTSNode(voice_lang=self.config.voice_lang)
             self._audio_output = None
         else:
             raise ValueError(
