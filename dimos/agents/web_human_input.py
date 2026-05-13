@@ -20,7 +20,7 @@ import reactivex.operators as ops
 
 from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
-from dimos.core.module import Module
+from dimos.core.module import Module, ModuleConfig
 from dimos.core.transport import pLCMTransport
 from dimos.stream.audio.node_normalizer import AudioNormalizer
 from dimos.utils.logging_config import setup_logger
@@ -32,7 +32,12 @@ if TYPE_CHECKING:
 logger = setup_logger()
 
 
+class WebInputConfig(ModuleConfig):
+    whisper_language: str = "en"
+
+
 class WebInput(Module):
+    config: WebInputConfig
     _web_interface: RobotWebInterface | None = None
     _thread: Thread | None = None
     _human_transport: pLCMTransport[str] | None = None
@@ -56,7 +61,9 @@ class WebInput(Module):
         # Here to prevent unwanted imports in the file.
         from dimos.stream.audio.stt.node_whisper import WhisperNode
 
-        stt_node = WhisperNode()
+        stt_node = WhisperNode(
+            modelopts={"language": self.config.whisper_language, "fp16": False}
+        )
 
         # Connect audio pipeline: browser audio → normalizer → whisper
         normalizer.consume_audio(audio_subject.pipe(ops.share()))
