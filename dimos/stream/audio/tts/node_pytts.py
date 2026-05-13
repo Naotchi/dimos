@@ -30,20 +30,51 @@ class PyTTSNode(AbstractTextTransform):  # type: ignore[misc]
     text observables, allowing it to be inserted into a text processing pipeline.
     """
 
-    def __init__(self, rate: int = 200, volume: float = 1.0) -> None:
+    def __init__(
+        self,
+        rate: int = 200,
+        volume: float = 1.0,
+        voice_lang: str | None = None,
+    ) -> None:
         """
         Initialize PyTTSNode.
 
         Args:
             rate: Speech rate (words per minute)
             volume: Volume level (0.0 to 1.0)
+            voice_lang: Optional language code (e.g. "ja"). When set, scans
+                available voices and selects the first one whose languages
+                metadata, id, or name contains the code. If no match is found,
+                logs a warning and keeps the default voice.
         """
         self.engine = pyttsx3.init()
         self.engine.setProperty("rate", rate)
         self.engine.setProperty("volume", volume)
 
+        if voice_lang is not None:
+            self._apply_voice_lang(voice_lang)
+
         self.text_subject = Subject()  # type: ignore[var-annotated]
         self.subscription = None
+
+    def _apply_voice_lang(self, lang: str) -> None:
+        """Select a voice matching the given language code, or warn if none."""
+        code = lang.lower()
+        voices = self.engine.getProperty("voices") or []
+        for voice in voices:
+            languages = getattr(voice, "languages", None) or []
+            for raw in languages:
+                tag = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
+                if tag.lower().startswith(code):
+                    self.engine.setProperty("voice", voice.id)
+                    return
+            haystack = f"{getattr(voice, 'id', '')} {getattr(voice, 'name', '')}".lower()
+            if code in haystack:
+                self.engine.setProperty("voice", voice.id)
+                return
+        logger.warning(
+            "PyTTSNode: no voice matching language %r found; using default voice", lang
+        )
 
     def emit_text(self) -> Observable:  # type: ignore[type-arg]
         """
