@@ -14,7 +14,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from pydantic import Field
@@ -64,6 +66,14 @@ class AzureVoiceLiveConfig(ModuleConfig):
 class AzureVoiceLiveAgent(Module):
     config: AzureVoiceLiveConfig
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._executor: ThreadPoolExecutor | None = None
+        self._mcp: Any = None
+        self._node: Any = None
+        self._mic: Any = None
+        self._speaker: Any = None
+
     @staticmethod
     def _convert_tools(mcp_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -79,6 +89,7 @@ class AzureVoiceLiveAgent(Module):
     @rpc
     def start(self) -> None:
         super().start()
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="VoiceLiveTool")
         cfg = self.config
         missing = [name for name in _REQUIRED_ENVS if not getattr(cfg, _env_to_field(name))]
         if missing:
@@ -108,6 +119,28 @@ class AzureVoiceLiveAgent(Module):
         self._speaker.consume_audio(self._node.emit_audio())
         self._node.start()
 
+    def stop(self) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True)
+            self._executor = None
+        super().stop()
+
     def _handle_tool_call(self, call_id: str, name: str, args_json: str) -> None:
-        """Filled in by Task 13."""
-        return None
+        if self._executor is None:
+            return
+
+        def _run() -> None:
+            try:
+                args = json.loads(args_json) if args_json else {}
+            except Exception as exc:  # noqa: BLE001
+                self._node.send_function_output(call_id, f"Error: invalid arguments JSON: {exc}")
+                return
+            try:
+                result = self._mcp.call_tool_text(name, args)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("MCP tool %s failed", name)
+                self._node.send_function_output(call_id, f"Error: {exc}")
+                return
+            self._node.send_function_output(call_id, result)
+
+        self._executor.submit(_run)

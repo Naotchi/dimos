@@ -93,3 +93,51 @@ def test_start_wires_mcp_node_and_audio(monkeypatch):
             mock_node.start.assert_called_once()
         finally:
             agent.stop()
+
+
+import time
+
+
+def test_handle_tool_call_forwards_to_mcp_and_returns_result():
+    agent = AzureVoiceLiveAgent()
+    try:
+        agent._mcp = MagicMock()
+        agent._mcp.call_tool_text.return_value = "moved successfully"
+        agent._node = MagicMock()
+        from concurrent.futures import ThreadPoolExecutor
+        agent._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="VoiceLiveToolTest")
+
+        agent._handle_tool_call("call_1", "relative_move", '{"x": 1.0}')
+
+        for _ in range(50):
+            if agent._node.send_function_output.called:
+                break
+            time.sleep(0.02)
+
+        agent._mcp.call_tool_text.assert_called_once_with("relative_move", {"x": 1.0})
+        agent._node.send_function_output.assert_called_once_with("call_1", "moved successfully")
+    finally:
+        agent.stop()
+
+
+def test_handle_tool_call_returns_error_text_on_exception():
+    agent = AzureVoiceLiveAgent()
+    try:
+        agent._mcp = MagicMock()
+        agent._mcp.call_tool_text.side_effect = RuntimeError("boom")
+        agent._node = MagicMock()
+        from concurrent.futures import ThreadPoolExecutor
+        agent._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="VoiceLiveToolTest")
+
+        agent._handle_tool_call("call_2", "broken_tool", "{}")
+
+        for _ in range(50):
+            if agent._node.send_function_output.called:
+                break
+            time.sleep(0.02)
+
+        args, _ = agent._node.send_function_output.call_args
+        assert args[0] == "call_2"
+        assert "boom" in args[1]
+    finally:
+        agent.stop()
