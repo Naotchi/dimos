@@ -17,6 +17,7 @@ import os
 
 from dimos.agents.mcp.mcp_client import McpClient
 from dimos.agents.mcp.mcp_server import McpServer
+from dimos.agents.system_prompt_ja import SYSTEM_PROMPT_JA
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.blueprints.agentic._common_agentic import _common_agentic
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial import unitree_go2_spatial
@@ -26,7 +27,7 @@ _LLM_MODEL = os.environ.get("DIMOS_LLM_MODEL", "gpt-4o")
 unitree_go2_agentic = autoconnect(
     unitree_go2_spatial,
     McpServer.blueprint(),
-    McpClient.blueprint(model=_LLM_MODEL),
+    McpClient.blueprint(model=_LLM_MODEL, system_prompt=SYSTEM_PROMPT_JA),
     _common_agentic,
 )
 

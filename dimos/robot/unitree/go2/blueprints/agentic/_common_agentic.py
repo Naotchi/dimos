@@ -25,8 +25,8 @@ _common_agentic = autoconnect(
     NavigationSkillContainer.blueprint(),
     PersonFollowSkillContainer.blueprint(camera_info=GO2Connection.camera_info_static),
     UnitreeSkillContainer.blueprint(),
-    WebInput.blueprint(),
-    SpeakSkill.blueprint(),
+    WebInput.blueprint(whisper_language="ja"),
+    SpeakSkill.blueprint(voice_lang="ja"),
 )
 
 __all__ = ["_common_agentic"]
