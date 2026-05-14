@@ -217,8 +217,9 @@ uv run dimos run unitree-go2-agentic-voice-live
 ```
 
 PC のローカルマイク / スピーカーで音声入出力します（Go2 オンボードオーディ
-オは未対応）。Web UI からのテキスト入力も並行して受け付けます。`SpeakSkill`
-は本バリアントには含まれません（Voice Live が TTS を担当）。
+オは未対応）。Web UI からのテキスト入力も並行して受け付けます。会話応答の
+TTS は Voice Live が担当しますが、`SpeakSkill` は SecurityModule の侵入者
+検知アラート用に残してあります。
 
 完全な環境変数リストは
 `docs/superpowers/specs/2026-05-14-voice-live-rewrite-design.md` を参照。
