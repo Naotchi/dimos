@@ -1,0 +1,23 @@
+{
+  "id": "conv-1777320436957-gk7hdw7w3",
+  "providerId": "claude",
+  "title": "Convert 2 PDFs to Obsidian format",
+  "titleGenerationStatus": "success",
+  "createdAt": 1777320436959,
+  "updatedAt": 1778130293054,
+  "lastResponseAt": 1777321021586,
+  "sessionId": "1885ca18-42d7-4cc7-ab52-1f8f082c59d2",
+  "providerState": {
+    "providerSessionId": "1885ca18-42d7-4cc7-ab52-1f8f082c59d2"
+  },
+  "usage": {
+    "model": "sonnet",
+    "inputTokens": 1,
+    "cacheCreationInputTokens": 10535,
+    "cacheReadInputTokens": 66505,
+    "contextWindow": 200000,
+    "contextTokens": 77041,
+    "percentage": 39,
+    "contextWindowIsAuthoritative": true
+  }
+}
