@@ -15,12 +15,27 @@ McpClient so blueprints can drop it in place.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
+
+from azure.ai.voicelive.aio import connect as voicelive_connect
+from azure.ai.voicelive.models import (
+    AudioEchoCancellation,
+    AudioNoiseReduction,
+    AzureStandardVoice,
+    InputAudioFormat,
+    Modality,
+    OutputAudioFormat,
+    RequestSession,
+    ServerEventType,
+    ServerVad,
+)
+from azure.core.credentials import AzureKeyCredential
 
 import numpy as np
 import sounddevice as sd  # type: ignore[import-untyped]
@@ -128,6 +143,17 @@ class _VoicePlayback:
         outdata[:] = np.frombuffer(out, dtype=np.int16).reshape(-1, 1)
 
 
+def _build_voice_config(voice: str) -> Any:
+    """Return an SDK voice config (AzureStandardVoice or raw string).
+
+    Azure neural voices contain a locale prefix like ``ja-JP-*`` or
+    ``en-US-*``; OpenAI voices (alloy, echo, ...) are plain strings.
+    """
+    if "-" in voice:
+        return AzureStandardVoice(name=voice)
+    return voice
+
+
 class AzureVoiceLiveConfig(ModuleConfig):
     endpoint: str = Field(
         default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}ENDPOINT", "")
@@ -181,9 +207,16 @@ class AzureVoiceLiveAgent(Module):
         self._tool_registry: dict[str, dict[str, Any]] = {}
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._conn: Any = None  # VoiceLiveConnection at runtime
+        self._playback: _VoicePlayback | None = None
+        self._mic_active = threading.Event()
+        self._response_active = False
+        self._response_text_buf: list[str] = []
 
     @rpc
     def start(self) -> None:
+        self._stop_event.clear()
         super().start()
         cfg = self.config
         missing = [
@@ -199,14 +232,90 @@ class AzureVoiceLiveAgent(Module):
         )
         self._mcp = McpAdapter(url=cfg.mcp_server_url)
 
+    def _start_ws_thread(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(
+            target=self._run_ws_thread,
+            name="AzureVoiceLiveAgent-ws",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run_ws_thread(self) -> None:
+        try:
+            asyncio.run(self._async_run())
+        except Exception:
+            logger.exception("Voice Live WS thread crashed")
+
+    async def _async_run(self) -> None:
+        cfg = self.config
+        credential = AzureKeyCredential(cfg.api_key)
+        async with voicelive_connect(
+            endpoint=cfg.endpoint,
+            credential=credential,
+            model=cfg.model,
+        ) as conn:
+            self._conn = conn
+            self._loop = asyncio.get_running_loop()
+            await self._send_session_update()
+            await self._event_loop()
+        self._conn = None
+        self._loop = None
+
+    async def _send_session_update(self) -> None:
+        cfg = self.config
+        session = RequestSession(
+            modalities=[Modality.TEXT, Modality.AUDIO],
+            instructions=cfg.system_prompt,
+            voice=_build_voice_config(cfg.voice),
+            input_audio_format=InputAudioFormat.PCM16,
+            output_audio_format=OutputAudioFormat.PCM16,
+            turn_detection=ServerVad(
+                threshold=0.5,
+                prefix_padding_ms=300,
+                silence_duration_ms=500,
+            ),
+            input_audio_echo_cancellation=AudioEchoCancellation(),
+            input_audio_noise_reduction=AudioNoiseReduction(
+                type="azure_deep_noise_suppression"
+            ),
+        )
+        await self._conn.session.update(session=session)
+
+    async def _event_loop(self) -> None:
+        async for event in self._conn:
+            if self._stop_event.is_set():
+                break
+            try:
+                await self._handle_event(event)
+            except Exception:
+                logger.exception("Voice Live event handler error")
+
+    async def _handle_event(self, event: Any) -> None:
+        et = event.type
+        if et == ServerEventType.SESSION_UPDATED:
+            logger.info("Voice Live session ready: %s", event.session.id)
+            self._mic_active.set()
+        elif et == ServerEventType.ERROR:
+            logger.error("Voice Live error: %s", event.error.message)
+        else:
+            logger.debug("Voice Live unhandled event: %s", et)
+
     @rpc
     def on_system_modules(self, _modules: list[Any]) -> None:
-        # WS worker thread を起動するのは後のタスクで実装
-        pass
+        assert self._mcp is not None
+        if not self._mcp.wait_for_ready(timeout=60.0):
+            raise TimeoutError(
+                f"MCP server not ready at {self.config.mcp_server_url}"
+            )
+        self._start_ws_thread()
 
     @rpc
     def stop(self) -> None:
         self._stop_event.set()
+        if self._loop is not None and self._conn is not None:
+            asyncio.run_coroutine_threadsafe(self._conn.close(), self._loop)
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=5.0)
         if self._tool_pool is not None:
