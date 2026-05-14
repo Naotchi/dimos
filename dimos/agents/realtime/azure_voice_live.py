@@ -426,6 +426,61 @@ class AzureVoiceLiveAgent(Module):
         # Treat injected messages as new conversational input → trigger a response.
         self._send_user_text(text, prompt_response=True)
 
+    @rpc
+    def dispatch_continuation(
+        self,
+        continuation: dict[str, Any],
+        continuation_context: dict[str, Any],
+    ) -> None:
+        tool_name = continuation.get("tool")
+        if not tool_name:
+            self.agent.publish(
+                HumanMessage(
+                    content=f"Continuation failed: missing 'tool' in {continuation}"
+                )
+            )
+            return
+        if tool_name not in self._tool_registry:
+            self.agent.publish(
+                HumanMessage(content=f"Continuation failed: tool '{tool_name}' not found")
+            )
+            return
+
+        raw_args = continuation.get("args", {}) or {}
+        args: dict[str, Any] = {}
+        for key, value in raw_args.items():
+            if isinstance(value, str) and value.startswith("$"):
+                ctx_key = value[1:]
+                if ctx_key not in continuation_context:
+                    self.agent.publish(
+                        HumanMessage(
+                            content=(
+                                f"Continuation failed: '{ctx_key}' not in context"
+                            )
+                        )
+                    )
+                    return
+                args[key] = continuation_context[ctx_key]
+            else:
+                args[key] = value
+
+        if self._tool_pool is None:
+            return
+        self._tool_pool.submit(self._run_continuation, tool_name, args)
+
+    def _run_continuation(self, tool_name: str, args: dict[str, Any]) -> None:
+        assert self._mcp is not None
+        try:
+            result = self._mcp.call_tool(tool_name, args)
+            text = _extract_tool_text(result) or "started"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("continuation tool %s failed", tool_name)
+            text = f"Error: {exc}"
+
+        injected = f"[continuation:{tool_name}] {text}"
+        self._send_user_text(injected, prompt_response=False)
+        self.agent.publish(HumanMessage(content=injected))
+
     def _on_mic_audio(self, event: Any) -> None:
         if not self._mic_active.is_set():
             return
