@@ -497,6 +497,15 @@ class AzureVoiceLiveAgent(Module):
         if et == ServerEventType.SESSION_UPDATED:
             logger.info("Voice Live session ready: %s", event.session.id)
             self._mic_active.set()
+        elif et == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
+            if self._playback is not None:
+                self._playback.skip_pending()
+            if self._response_active and self._conn is not None:
+                try:
+                    await self._conn.response.cancel()
+                except Exception as exc:  # noqa: BLE001
+                    if "no active response" not in str(exc).lower():
+                        logger.warning("response.cancel failed: %s", exc)
         elif et == ServerEventType.RESPONSE_CREATED:
             self._response_active = True
             self._response_text_buf = []
