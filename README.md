@@ -204,18 +204,24 @@ dimos run unitree-go2
 
 ### Azure Voice Live バリアント
 
-リアルタイム音声会話（STT + LLM + TTS が Azure Voice Live 1本）で起動するには：
+リアルタイム音声会話（STT + LLM + TTS + 関数呼び出しが Azure Voice Live 1
+セッション）で起動するには:
 
 ```bash
-export DIMOS_AZURE_VOICE_LIVE_ENDPOINT=wss://<your-resource>.cognitiveservices.azure.com/voice-live/realtime
+export DIMOS_AZURE_VOICE_LIVE_ENDPOINT=wss://<your-resource>.cognitiveservices.azure.com/
 export DIMOS_AZURE_VOICE_LIVE_API_KEY=<key>
-export DIMOS_AZURE_VOICE_LIVE_MODEL=<deployment-name>           # 例: gpt-4o-realtime
-export DIMOS_AZURE_VOICE_LIVE_VOICE=ja-JP-NanamiNeural
+export DIMOS_AZURE_VOICE_LIVE_MODEL=gpt-realtime         # 任意（既定: gpt-realtime）
+export DIMOS_AZURE_VOICE_LIVE_VOICE=ja-JP-NanamiNeural   # 任意（既定: ja-JP-NanamiNeural）
 
 uv run dimos run unitree-go2-agentic-voice-live
 ```
 
-DimOS が動作する PC のローカルマイク/スピーカーで音声入出力します（Go2 オンボードオーディオは未対応）。`SpeakSkill` および Web UI は本バリアントには含まれません。
+PC のローカルマイク / スピーカーで音声入出力します（Go2 オンボードオーディ
+オは未対応）。Web UI からのテキスト入力も並行して受け付けます。`SpeakSkill`
+は本バリアントには含まれません（Voice Live が TTS を担当）。
+
+完全な環境変数リストは
+`docs/superpowers/specs/2026-05-14-voice-live-rewrite-design.md` を参照。
 
 # Agent CLI and MCP
 
