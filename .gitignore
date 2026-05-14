@@ -61,6 +61,7 @@ yolo11n.pt
 .direnv/
 
 /logs
+/scripts/logs
 
 *.so
 
