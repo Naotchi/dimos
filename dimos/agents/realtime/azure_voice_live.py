@@ -358,9 +358,24 @@ class AzureVoiceLiveAgent(Module):
         if et == ServerEventType.SESSION_UPDATED:
             logger.info("Voice Live session ready: %s", event.session.id)
             self._mic_active.set()
+        elif et == ServerEventType.RESPONSE_CREATED:
+            self._response_active = True
+            self._response_text_buf = []
+            self.agent_idle.publish(False)
         elif et == ServerEventType.RESPONSE_AUDIO_DELTA:
             if self._playback is not None:
                 self._playback.enqueue(event.delta)
+        elif et == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA:
+            self._response_text_buf.append(event.delta or "")
+        elif et == ServerEventType.RESPONSE_TEXT_DELTA:
+            self._response_text_buf.append(event.delta or "")
+        elif et == ServerEventType.RESPONSE_DONE:
+            text = "".join(self._response_text_buf).strip()
+            if text:
+                self.agent.publish(AIMessage(content=text))
+            self._response_text_buf = []
+            self._response_active = False
+            self.agent_idle.publish(True)
         elif et == ServerEventType.ERROR:
             logger.error("Voice Live error: %s", event.error.message)
         else:
