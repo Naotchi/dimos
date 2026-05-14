@@ -528,6 +528,7 @@ class AzureVoiceLiveAgent(Module):
                 except Exception as exc:  # noqa: BLE001
                     if "no active response" not in str(exc).lower():
                         logger.warning("response.cancel failed: %s", exc)
+            self.agent_idle.publish(False)
         elif et == ServerEventType.RESPONSE_CREATED:
             self._response_active = True
             self._response_text_buf = []
