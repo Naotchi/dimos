@@ -154,6 +154,37 @@ def _build_voice_config(voice: str) -> Any:
     return voice
 
 
+def _mcp_to_voice_function(mcp_tool: dict[str, Any]) -> dict[str, Any]:
+    """Convert an MCP tool descriptor to the Voice Live function-tool dict.
+
+    The SDK accepts either dataclass instances or plain dicts in the
+    ``tools`` list.  We send dicts to avoid SDK type drift.
+    """
+    return {
+        "type": "function",
+        "name": mcp_tool["name"],
+        "description": mcp_tool.get("description", ""),
+        "parameters": mcp_tool.get(
+            "inputSchema", {"type": "object", "properties": {}}
+        ),
+    }
+
+
+def _extract_tool_text(result: dict[str, Any]) -> str:
+    """Pull text content out of an MCP tools/call result.
+
+    Image / binary content items are replaced with a ``[image omitted]``
+    suffix so the LLM at least knows something was returned.
+    """
+    content = result.get("content", [])
+    text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+    text = "\n".join(p for p in text_parts if p)
+    has_non_text = any(c.get("type") != "text" for c in content)
+    if has_non_text:
+        text = (text + "\n[image omitted]").strip()
+    return text
+
+
 class AzureVoiceLiveConfig(ModuleConfig):
     endpoint: str = Field(
         default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}ENDPOINT", "")
@@ -265,6 +296,7 @@ class AzureVoiceLiveAgent(Module):
 
     async def _send_session_update(self) -> None:
         cfg = self.config
+        tools = [_mcp_to_voice_function(t) for t in self._tool_registry.values()]
         session = RequestSession(
             modalities=[Modality.TEXT, Modality.AUDIO],
             instructions=cfg.system_prompt,
@@ -280,6 +312,7 @@ class AzureVoiceLiveAgent(Module):
             input_audio_noise_reduction=AudioNoiseReduction(
                 type="azure_deep_noise_suppression"
             ),
+            tools=tools,
         )
         await self._conn.session.update(session=session)
 
@@ -309,6 +342,13 @@ class AzureVoiceLiveAgent(Module):
             raise TimeoutError(
                 f"MCP server not ready at {self.config.mcp_server_url}"
             )
+        mcp_tools = self._mcp.list_tools()
+        self._tool_registry = {t["name"]: t for t in mcp_tools}
+        logger.info(
+            "Voice Live discovered %d MCP tools: %s",
+            len(mcp_tools),
+            [t["name"] for t in mcp_tools],
+        )
         self._start_ws_thread()
 
     @rpc
