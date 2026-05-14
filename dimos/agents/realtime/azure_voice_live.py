@@ -49,6 +49,7 @@ import sounddevice as sd  # type: ignore[import-untyped]
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import Field
 
+from dimos.agents.mcp import tool_stream
 from dimos.agents.mcp.mcp_adapter import McpAdapter
 from dimos.agents.realtime.prompts.japanese import JAPANESE_SYSTEM_PROMPT
 from dimos.core.core import rpc
@@ -253,6 +254,7 @@ class AzureVoiceLiveAgent(Module):
         self._mic: SounddeviceAudioSource | None = None
         self._mic_subscription: Any = None
         self._human_input_sub: Any = None
+        self._tool_stream_cleanup: Any = None
 
     @rpc
     def start(self) -> None:
@@ -285,6 +287,9 @@ class AzureVoiceLiveAgent(Module):
         self._playback.start()
         self._human_input_sub = self.human_input.subscribe(self._on_human_text)
         self.register_disposable(Disposable(self._human_input_sub))
+        self._tool_stream_cleanup = tool_stream.subscribe(
+            self._on_tool_stream_message
+        )
 
     def _start_ws_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -412,6 +417,23 @@ class AzureVoiceLiveAgent(Module):
         if not text:
             return
         self._send_user_text(text, prompt_response=True)
+
+    def _on_tool_stream_message(self, msg: dict[str, Any]) -> None:
+        method = msg.get("method")
+        params = msg.get("params") or {}
+        if method == tool_stream.NOTIFICATIONS_PROGRESS_METHOD:
+            text = params.get("message") or ""
+            tool_name = (params.get("_meta") or {}).get("tool_name") or "tool"
+        elif method == tool_stream.NOTIFICATIONS_MESSAGE_METHOD:
+            text = params.get("data") or ""
+            tool_name = params.get("logger") or "tool"
+        else:
+            return
+        if not text:
+            return
+        injected = f"[tool:{tool_name}] {text}"
+        self._send_user_text(injected, prompt_response=False)
+        self.agent.publish(HumanMessage(content=injected))
 
     @rpc
     def add_message(self, message: BaseMessage) -> None:
@@ -553,6 +575,12 @@ class AzureVoiceLiveAgent(Module):
 
     @rpc
     def stop(self) -> None:
+        if self._tool_stream_cleanup is not None:
+            try:
+                self._tool_stream_cleanup()
+            except Exception:
+                pass
+            self._tool_stream_cleanup = None
         if self._mic_subscription is not None:
             try:
                 self._mic_subscription.dispose()
