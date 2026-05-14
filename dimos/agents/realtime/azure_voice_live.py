@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import queue
 import threading
@@ -342,6 +343,48 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 logger.exception("Voice Live event handler error")
 
+    def _dispatch_function_call(
+        self, call_id: str, name: str, arguments: str
+    ) -> None:
+        if self._tool_pool is None or self._mcp is None:
+            return
+        self._tool_pool.submit(self._run_function_call, call_id, name, arguments)
+
+    def _run_function_call(
+        self, call_id: str, name: str, arguments: str
+    ) -> None:
+        assert self._mcp is not None
+        try:
+            args = json.loads(arguments) if arguments else {}
+        except Exception as exc:  # noqa: BLE001
+            output = f"Error: invalid arguments JSON: {exc}"
+            self._send_function_output(call_id, output)
+            return
+        try:
+            result = self._mcp.call_tool(name, args)
+            output = _extract_tool_text(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("MCP tool %s failed", name)
+            output = f"Error: {exc}"
+        self._send_function_output(call_id, output)
+
+    def _send_function_output(self, call_id: str, output: str) -> None:
+        if self._loop is None or self._conn is None:
+            logger.warning("send_function_output before WS ready; dropping")
+            return
+
+        async def _send() -> None:
+            await self._conn.conversation.item.create(
+                item={
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": output,
+                }
+            )
+            await self._conn.response.create()
+
+        asyncio.run_coroutine_threadsafe(_send(), self._loop)
+
     def _on_mic_audio(self, event: Any) -> None:
         if not self._mic_active.is_set():
             return
@@ -369,6 +412,12 @@ class AzureVoiceLiveAgent(Module):
             self._response_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_TEXT_DELTA:
             self._response_text_buf.append(event.delta or "")
+        elif et == ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE:
+            self._dispatch_function_call(
+                call_id=event.call_id,
+                name=event.name,
+                arguments=event.arguments,
+            )
         elif et == ServerEventType.RESPONSE_DONE:
             text = "".join(self._response_text_buf).strip()
             if text:
