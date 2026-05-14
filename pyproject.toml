@@ -173,6 +173,7 @@ agents = [
     "sounddevice",
     "faster-whisper>=1.0.0",
     "pyttsx3>=2.90",
+    "pyopenjtalk>=0.4.1",
 ]
 
 web = [

@@ -23,6 +23,8 @@ from dimos.robot.unitree.go2.blueprints.agentic._common_agentic import _common_a
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial import unitree_go2_spatial
 
 _LLM_MODEL = os.environ.get("DIMOS_LLM_MODEL", "gpt-4o")
+# Default to the bundled Japanese TTS for this blueprint; explicit DIMOS_TTS wins.
+os.environ.setdefault("DIMOS_TTS", "open_jtalk")
 
 unitree_go2_agentic = autoconnect(
     unitree_go2_spatial,
