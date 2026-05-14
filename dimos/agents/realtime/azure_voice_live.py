@@ -16,12 +16,15 @@ McpClient so blueprints can drop it in place.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
+
+from dimos.stream.audio.node_microphone import SounddeviceAudioSource
 
 from azure.ai.voicelive.aio import connect as voicelive_connect
 from azure.ai.voicelive.models import (
@@ -244,6 +247,8 @@ class AzureVoiceLiveAgent(Module):
         self._mic_active = threading.Event()
         self._response_active = False
         self._response_text_buf: list[str] = []
+        self._mic: SounddeviceAudioSource | None = None
+        self._mic_subscription: Any = None
 
     @rpc
     def start(self) -> None:
@@ -262,6 +267,13 @@ class AzureVoiceLiveAgent(Module):
             max_workers=4, thread_name_prefix="VoiceLiveTool"
         )
         self._mcp = McpAdapter(url=cfg.mcp_server_url)
+        self._mic = SounddeviceAudioSource(
+            device_index=cfg.mic_device_index,
+            sample_rate=cfg.sample_rate,
+        )
+        self._mic_subscription = self._mic.emit_audio().subscribe(
+            on_next=self._on_mic_audio
+        )
 
     def _start_ws_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -325,6 +337,17 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 logger.exception("Voice Live event handler error")
 
+    def _on_mic_audio(self, event: Any) -> None:
+        if not self._mic_active.is_set():
+            return
+        if self._loop is None or self._conn is None:
+            return
+        pcm = event.to_int16().data.tobytes()
+        b64 = base64.b64encode(pcm).decode("ascii")
+        asyncio.run_coroutine_threadsafe(
+            self._conn.input_audio_buffer.append(audio=b64), self._loop
+        )
+
     async def _handle_event(self, event: Any) -> None:
         et = event.type
         if et == ServerEventType.SESSION_UPDATED:
@@ -353,6 +376,19 @@ class AzureVoiceLiveAgent(Module):
 
     @rpc
     def stop(self) -> None:
+        if self._mic_subscription is not None:
+            try:
+                self._mic_subscription.dispose()
+            except Exception:
+                pass
+            self._mic_subscription = None
+        if self._mic is not None:
+            try:
+                self._mic.stop()
+            except Exception:
+                pass
+            self._mic = None
+        self._mic_active.clear()
         self._stop_event.set()
         if self._loop is not None and self._conn is not None:
             asyncio.run_coroutine_threadsafe(self._conn.close(), self._loop)
