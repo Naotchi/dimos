@@ -25,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
+from reactivex.disposable import Disposable
+
 from dimos.stream.audio.node_microphone import SounddeviceAudioSource
 
 from azure.ai.voicelive.aio import connect as voicelive_connect
@@ -250,6 +252,7 @@ class AzureVoiceLiveAgent(Module):
         self._response_text_buf: list[str] = []
         self._mic: SounddeviceAudioSource | None = None
         self._mic_subscription: Any = None
+        self._human_input_sub: Any = None
 
     @rpc
     def start(self) -> None:
@@ -280,6 +283,8 @@ class AzureVoiceLiveAgent(Module):
             device_index=cfg.speaker_device_index,
         )
         self._playback.start()
+        self._human_input_sub = self.human_input.subscribe(self._on_human_text)
+        self.register_disposable(Disposable(self._human_input_sub))
 
     def _start_ws_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -385,6 +390,42 @@ class AzureVoiceLiveAgent(Module):
 
         asyncio.run_coroutine_threadsafe(_send(), self._loop)
 
+    def _send_user_text(self, text: str, prompt_response: bool = True) -> None:
+        if self._loop is None or self._conn is None:
+            logger.warning("user text dropped: WS not ready (%r)", text)
+            return
+
+        async def _send() -> None:
+            await self._conn.conversation.item.create(
+                item={
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}],
+                }
+            )
+            if prompt_response:
+                await self._conn.response.create()
+
+        asyncio.run_coroutine_threadsafe(_send(), self._loop)
+
+    def _on_human_text(self, text: str) -> None:
+        if not text:
+            return
+        self._send_user_text(text, prompt_response=True)
+
+    @rpc
+    def add_message(self, message: BaseMessage) -> None:
+        """Inject a message into the conversation from another module."""
+        text = (
+            message.content
+            if isinstance(message.content, str)
+            else str(message.content)
+        )
+        if not text:
+            return
+        # Treat injected messages as new conversational input → trigger a response.
+        self._send_user_text(text, prompt_response=True)
+
     def _on_mic_audio(self, event: Any) -> None:
         if not self._mic_active.is_set():
             return
@@ -467,6 +508,12 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 pass
             self._playback = None
+        if self._human_input_sub is not None:
+            try:
+                self._human_input_sub.dispose()
+            except Exception:
+                pass
+            self._human_input_sub = None
         self._stop_event.set()
         if self._loop is not None and self._conn is not None:
             asyncio.run_coroutine_threadsafe(self._conn.close(), self._loop)
