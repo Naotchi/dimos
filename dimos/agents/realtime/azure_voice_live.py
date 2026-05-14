@@ -274,6 +274,11 @@ class AzureVoiceLiveAgent(Module):
         self._mic_subscription = self._mic.emit_audio().subscribe(
             on_next=self._on_mic_audio
         )
+        self._playback = _VoicePlayback(
+            sample_rate=cfg.sample_rate,
+            device_index=cfg.speaker_device_index,
+        )
+        self._playback.start()
 
     def _start_ws_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -353,6 +358,9 @@ class AzureVoiceLiveAgent(Module):
         if et == ServerEventType.SESSION_UPDATED:
             logger.info("Voice Live session ready: %s", event.session.id)
             self._mic_active.set()
+        elif et == ServerEventType.RESPONSE_AUDIO_DELTA:
+            if self._playback is not None:
+                self._playback.enqueue(event.delta)
         elif et == ServerEventType.ERROR:
             logger.error("Voice Live error: %s", event.error.message)
         else:
@@ -389,6 +397,12 @@ class AzureVoiceLiveAgent(Module):
                 pass
             self._mic = None
         self._mic_active.clear()
+        if self._playback is not None:
+            try:
+                self._playback.stop()
+            except Exception:
+                pass
+            self._playback = None
         self._stop_event.set()
         if self._loop is not None and self._conn is not None:
             asyncio.run_coroutine_threadsafe(self._conn.close(), self._loop)
