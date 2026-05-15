@@ -66,3 +66,22 @@ def test_new_turn_visible_from_another_thread():
     t.start()
     t.join()
     assert captured == [tid]
+
+
+def test_log_bench_event_envelope_takes_precedence_over_user_fields():
+    """User-supplied 'event_kind' / 'turn_id' / 't' must not corrupt the envelope."""
+    turn_context.reset()
+    tid = turn_context.new_turn()
+    with patch.object(turn_context, "logger") as mock_logger:
+        turn_context.log_bench_event(
+            "real_kind",
+            event_kind="fake_kind",
+            turn_id="fake_turn",
+            t=0.0,
+            extra="payload",
+        )
+    _, kwargs = mock_logger.info.call_args
+    assert kwargs["event_kind"] == "real_kind"
+    assert kwargs["turn_id"] == tid
+    assert isinstance(kwargs["t"], float) and kwargs["t"] != 0.0
+    assert kwargs["extra"] == "payload"

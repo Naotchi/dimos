@@ -53,11 +53,13 @@ def reset() -> None:
 
 
 def log_bench_event(kind: str, **fields: Any) -> None:
-    """Emit a structured bench event with consistent envelope fields."""
-    payload: dict[str, Any] = {
-        "event_kind": kind,
-        "turn_id": current_turn(),
-        "t": round(time.perf_counter(), 6),
-    }
-    payload.update(fields)
+    """Emit a structured bench event with consistent envelope fields.
+
+    Envelope fields (event_kind, turn_id, t) always take precedence over
+    any user-supplied fields of the same name to keep the schema stable.
+    """
+    payload: dict[str, Any] = dict(fields)
+    payload["event_kind"] = kind
+    payload["turn_id"] = current_turn()
+    payload["t"] = round(time.perf_counter(), 6)
     logger.info(f"bench {kind}", **payload)
