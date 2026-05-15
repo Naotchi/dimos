@@ -1,0 +1,68 @@
+version: 1
+fixtures:
+  # speak_only: short greetings / Q&A that should yield 'speak' only.
+  - id: speak_001
+    category: speak_only
+    wav: speak_001.wav
+    text: "おはよう"
+    notes: "short greeting"
+  - id: speak_002
+    category: speak_only
+    wav: speak_002.wav
+    text: "自己紹介してください"
+    notes: "self introduction"
+  - id: speak_003
+    category: speak_only
+    wav: speak_003.wav
+    text: "今日の天気はどう"
+    notes: "small talk"
+  - id: speak_004
+    category: speak_only
+    wav: speak_004.wav
+    text: "ありがとう"
+    notes: "thanks"
+
+  # motion_only: imperative motion commands. May still produce a brief speak
+  # ack, but the primary intent is a motion tool.
+  - id: motion_001
+    category: motion_only
+    wav: motion_001.wav
+    text: "前に進んで"
+    notes: "move forward"
+  - id: motion_002
+    category: motion_only
+    wav: motion_002.wav
+    text: "お座り"
+    notes: "sit"
+  - id: motion_003
+    category: motion_only
+    wav: motion_003.wav
+    text: "立って"
+    notes: "stand"
+  - id: motion_004
+    category: motion_only
+    wav: motion_004.wav
+    text: "右を向いて"
+    notes: "turn right"
+
+  # both: combined commands that should yield both speak and motion.
+  - id: both_001
+    category: both
+    wav: both_001.wav
+    text: "立ち上がって挨拶してください"
+    notes: "stand + greet"
+  - id: both_002
+    category: both
+    wav: both_002.wav
+    text: "前に進んで、進んだら教えて"
+    notes: "move + announce"
+  - id: both_003
+    category: both
+    wav: both_003.wav
+    text: "お座りして自己紹介して"
+    notes: "sit + introduce"
+  - id: both_004
+    category: both
+    wav: both_004.wav
+    text: "右を向いて何が見えるか教えて"
+    notes: "turn + report"
