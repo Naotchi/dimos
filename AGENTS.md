@@ -9,9 +9,8 @@ The agentic operating system for generalist robotics. `Modules` communicate via 
 ## Quick Start
 
 ```bash
-# Install (creates .venv/)
+# Install
 uv sync --extra all
-source .venv/bin/activate   # so `dimos` is on PATH; alternatively prefix commands with `uv run`
 
 # List all runnable blueprints
 dimos list

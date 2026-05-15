@@ -13,20 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Japanese common agentic skill set: mirrors _common_agentic with JA TTS/STT."""
+
 from dimos.agents.skills.navigation import NavigationSkillContainer
 from dimos.agents.skills.person_follow import PersonFollowSkillContainer
-from dimos.agents.skills.speak_skill import SpeakSkill
-from dimos.agents.web_human_input import WebInput
+from dimos.agents.skills.speak_skill_ja import JapaneseSpeakSkill
+from dimos.agents.web_human_input_ja import JapaneseWebInput
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.connection import GO2Connection
 from dimos.robot.unitree.unitree_skill_container import UnitreeSkillContainer
 
-_common_agentic = autoconnect(
+_common_agentic_ja = autoconnect(
     NavigationSkillContainer.blueprint(),
     PersonFollowSkillContainer.blueprint(camera_info=GO2Connection.camera_info_static),
     UnitreeSkillContainer.blueprint(),
-    WebInput.blueprint(),
-    SpeakSkill.blueprint(),
+    JapaneseWebInput.blueprint(),
+    JapaneseSpeakSkill.blueprint(),
 )
 
-__all__ = ["_common_agentic"]
+__all__ = ["_common_agentic_ja"]
