@@ -1,6 +1,11 @@
 # unitree-go2-agentic-ja E2E Bench Design
 
-Status: design approved 2026-05-16, awaiting implementation plan.
+Status: implemented 2026-05-16. Live end-to-end verification deferred — Task 6 cannot dry-run without robot (192.168.11.10) and LLM API credentials in this environment. All unit tests pass (12 / 12).
+
+Implementation notes that diverged from this spec:
+- Audio injection method changed from "publish to `_audio_subject` directly" to "POST to `/upload_audio` HTTP endpoint" because `JapaneseWebInput` runs in a worker subprocess; the in-process Subject is not reachable through the `ModuleProxy`. The HTTP endpoint already exists on `RobotWebInterface` (port 5555, what the WebUI uses) and runs inside the subprocess that owns the live Subject — so the same code path is exercised. The schema and metrics are unchanged.
+
+See `docs/superpowers/plans/2026-05-16-agentic-ja-bench-e2e.md` for the executed plan.
 
 ## 1. Purpose & Scope
 
