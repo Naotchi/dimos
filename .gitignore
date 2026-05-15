@@ -2,6 +2,9 @@
 **/*.ignore
 **/*.ignore.*
 
+# Obsidian vault metadata (docs/ is a personal vault)
+.obsidian/
+
 # Default output of `dimos apriltag`
 /apriltags.pdf
 
