@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 """Replay wav fixtures through the unitree_go2_agentic_ja blueprint.
 
-Boots the blueprint in-process, looks up the JapaneseWebInput instance, and
-publishes fixture wavs to its _audio_subject. Emits a bench event
-(user_audio_end) immediately after the last chunk is published so the
+Boots the blueprint in-process, then uses the existing /upload_audio HTTP
+endpoint (served by RobotWebInterface on port 5555, same endpoint the WebUI
+uses) to inject fixture wavs. The endpoint runs inside the JapaneseWebInput
+worker subprocess, decodes via ffmpeg, and pushes the AudioEvent into the
+in-subprocess audio_subject -> Whisper -> agent pipeline.
+
+After publishing each wav we emit a `user_audio_end` bench event so the
 analyzer can compute end-to-end latencies relative to that timestamp.
 
 Usage:
@@ -21,20 +25,21 @@ import time
 import wave
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
-import numpy as np
+import requests
 import yaml
 
 from dimos.agents.bench_ja import log_bench_event, new_turn, reset
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
-from dimos.agents.web_human_input_ja import JapaneseWebInput
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_ja import (
     unitree_go2_agentic_ja,
 )
-from dimos.stream.audio.base import AudioEvent
 from dimos.utils.logging_config import set_run_log_dir
+
+WEB_PORT = 5555
+UPLOAD_URL = f"http://localhost:{WEB_PORT}/upload_audio"
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,13 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--shuffle", action="store_true")
-    p.add_argument(
-        "--realtime",
-        action="store_true",
-        help="Publish chunks with sleep matching playback (default: burst).",
-    )
-    p.add_argument("--chunk-ms", type=int, default=200)
     p.add_argument("--turn-timeout", type=float, default=30.0)
+    p.add_argument("--initial-idle-timeout", type=float, default=60.0)
     p.add_argument(
         "--out",
         default=None,
@@ -58,22 +58,13 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def load_wav(path: Path) -> tuple[np.ndarray, int]:
+def wav_seconds(path: Path) -> float:
+    """Read the duration (s) of a 16-bit PCM WAV without loading samples."""
     with wave.open(str(path), "rb") as w:
-        sr = w.getframerate()
-        n = w.getnframes()
-        raw = w.readframes(n)
-    audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-    return audio, sr
+        return round(w.getnframes() / w.getframerate(), 4)
 
 
-def chunked(audio: np.ndarray, sr: int, chunk_ms: int) -> Iterator[np.ndarray]:
-    step = max(1, int(sr * chunk_ms / 1000))
-    for i in range(0, len(audio), step):
-        yield audio[i : i + step]
-
-
-def fixture_iter(fixtures: list[dict], runs: int, warmup: int, shuffle: bool):
+def fixture_iter(fixtures: list[dict[str, Any]], runs: int, warmup: int, shuffle: bool):
     import random
 
     order = list(range(len(fixtures)))
@@ -100,17 +91,39 @@ def configure_log_dir(out_override: str | None) -> Path:
     return path
 
 
-# TODO: Step 6.1 probe revealed JapaneseWebInput runs in a worker subprocess,
-# so direct .on_next() into web_input._audio_subject does not reach the
-# pipeline. Implement WebSocket fallback by connecting to ws://localhost:5555
-# (see dimos/web/robot_web_interface.py for the actual audio endpoint path)
-# and sending PCM frames in the WebUI's format.
-def boot_blueprint() -> tuple[ModuleCoordinator, JapaneseWebInput, TimedMcpClient]:
-    """Build the blueprint and return (coordinator, web_input_proxy, mcp_client_proxy)."""
-    coordinator = ModuleCoordinator.build(unitree_go2_agentic_ja)
-    web_input = coordinator.get_instance(JapaneseWebInput)
+def boot_blueprint() -> tuple[ModuleCoordinator, TimedMcpClient]:
+    """Build the blueprint; return coordinator and the (proxy) mcp_client."""
+    coordinator = ModuleCoordinator.build(unitree_go2_agentic_ja, blueprint_args={})
+    # JapaneseWebInput runs in a worker subprocess; we reach it via /upload_audio.
+    # We still need TimedMcpClient.agent_idle (cross-process Out works via dimos
+    # streams; the subscribe below pulls events back to this process).
     mcp_client = coordinator.get_instance(TimedMcpClient)
-    return coordinator, web_input, mcp_client
+    return coordinator, mcp_client
+
+
+def wait_for_web_interface(timeout: float = 30.0) -> bool:
+    """Poll /upload_audio until it responds (404/405 = up, ConnectionError = down)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = requests.get(f"http://localhost:{WEB_PORT}/text_streams", timeout=1.0)
+            if r.status_code == 200:
+                return True
+        except requests.RequestException:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def post_wav(wav_path: Path) -> bool:
+    """POST wav to /upload_audio. Returns True on 2xx, False otherwise."""
+    with wav_path.open("rb") as f:
+        files = {"file": (wav_path.name, f, "audio/wav")}
+        r = requests.post(UPLOAD_URL, files=files, timeout=30.0)
+    if r.status_code // 100 != 2:
+        print(f"[replay] upload failed for {wav_path}: {r.status_code} {r.text}", file=sys.stderr)
+        return False
+    return True
 
 
 def main() -> int:
@@ -122,7 +135,7 @@ def main() -> int:
     manifest = yaml.safe_load(fx_path.read_text())
     fixtures = manifest["fixtures"]
 
-    coordinator, web_input, mcp_client = boot_blueprint()
+    coordinator, mcp_client = boot_blueprint()
 
     idle_event = threading.Event()
 
@@ -134,31 +147,41 @@ def main() -> int:
 
     mcp_client.agent_idle.subscribe(on_idle)
 
-    if not idle_event.wait(timeout=60.0):
-        print("[replay] timed out waiting for initial agent_idle", file=sys.stderr)
+    print(f"[replay] waiting for web interface on port {WEB_PORT}...", flush=True)
+    if not wait_for_web_interface(timeout=args.initial_idle_timeout):
+        print("[replay] web interface never came up", file=sys.stderr)
+        coordinator.stop()
         return 2
 
-    fixtures_iter = list(fixture_iter(fixtures, args.runs, args.warmup, args.shuffle))
-    print(f"[replay] {len(fixtures_iter)} runs scheduled", flush=True)
+    print("[replay] waiting for initial agent_idle...", flush=True)
+    if not idle_event.wait(timeout=args.initial_idle_timeout):
+        print("[replay] timed out waiting for initial agent_idle", file=sys.stderr)
+        coordinator.stop()
+        return 2
 
-    for fx in fixtures_iter:
+    schedule = list(fixture_iter(fixtures, args.runs, args.warmup, args.shuffle))
+    print(f"[replay] {len(schedule)} runs scheduled", flush=True)
+
+    for fx in schedule:
         idle_event.clear()
         if not idle_event.wait(timeout=args.turn_timeout):
             print(f"[replay] WARN: idle wait timed out before fx {fx['id']}", file=sys.stderr)
 
         wav_path = fx_path.parent / fx["wav"]
-        audio, sr = load_wav(wav_path)
-        audio_seconds = round(len(audio) / sr, 4)
+        audio_seconds = wav_seconds(wav_path)
 
         idle_event.clear()
-        for chunk in chunked(audio, sr, args.chunk_ms):
-            web_input._audio_subject.on_next(  # noqa: SLF001 — bench-only hook
-                AudioEvent(data=chunk, sample_rate=sr)
+        ok = post_wav(wav_path)
+        if not ok:
+            log_bench_event(
+                "upload_failed",
+                fixture_id=fx["id"],
+                run_idx=fx["run_idx"],
             )
-            if args.realtime:
-                time.sleep(len(chunk) / sr)
+            continue
 
-        # t=0: last chunk has been published.
+        # t=0: upload request has completed; the wav is now flowing into the
+        # in-subprocess audio pipeline.
         reset()
         new_turn()
         log_bench_event(
