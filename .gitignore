@@ -5,6 +5,9 @@
 # Obsidian vault metadata (docs/ is a personal vault)
 .obsidian/
 
+# Personal notes kept out of the fork
+docs/private/
+
 # Default output of `dimos apriltag`
 /apriltags.pdf
 
