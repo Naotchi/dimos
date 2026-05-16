@@ -120,3 +120,60 @@ async def test_audio_present_then_silent_action_tool():
     assert agent._conn.conversation.item.create.await_count == 1
     assert agent._conn.response.create.call_count == 0
     agent._mcp.call_tool.assert_called_once_with("relative_move", {"forward": 1.0})
+
+
+async def _complete_pending_subresponse(agent):
+    """Simulate Voice Live finishing the preface/tool_result response."""
+    # The agent task is awaiting _resp_done_event after issuing response.create.
+    # Emit RESPONSE_CREATED + RESPONSE_DONE for that response.
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_DELTA, delta=b"\x01"),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+
+
+@pytest.mark.asyncio
+async def test_preface_forced_when_no_audio_no_tool():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    # Let _on_response_done run up to its await.
+    await asyncio.sleep(0)
+    await _complete_pending_subresponse(agent)
+    await _drain_tasks()
+
+    assert agent._conn.response.create.await_count == 1
+    call = agent._conn.response.create.await_args_list[0]
+    instructions = call.kwargs["response"]["instructions"]
+    assert "短く一言" in instructions
+
+
+@pytest.mark.asyncio
+async def test_preface_forced_before_action_tool_then_silent():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(
+            type=ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE,
+            call_id="c2",
+            name="relative_move",
+            arguments='{"forward": 1.0}',
+        ),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await asyncio.sleep(0)
+    await _complete_pending_subresponse(agent)
+    await _drain_tasks()
+
+    # Exactly one response.create (the preface). Tool ran. No second response.create.
+    assert agent._conn.response.create.await_count == 1
+    preface_call = agent._conn.response.create.await_args_list[0]
+    assert "relative_move" in preface_call.kwargs["response"]["instructions"]
+    agent._mcp.call_tool.assert_called_once_with("relative_move", {"forward": 1.0})
+    assert agent._conn.conversation.item.create.await_count == 1
