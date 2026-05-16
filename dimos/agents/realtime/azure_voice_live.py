@@ -239,7 +239,7 @@ class AzureVoiceLiveAgent(Module):
     config: AzureVoiceLiveConfig
     agent: Out[BaseMessage]
     human_input: In[str]
-    web_audio_in: In[AudioEvent]
+    web_audio: In[AudioEvent]
     agent_idle: Out[bool]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -288,7 +288,7 @@ class AzureVoiceLiveAgent(Module):
             on_next=self._on_mic_audio
         )
         self._web_audio_sub = Disposable(
-            self.web_audio_in.subscribe(self._on_mic_audio)
+            self.web_audio.subscribe(self._on_mic_audio)
         )
         self.register_disposable(self._web_audio_sub)
         self._playback = _VoicePlayback(
@@ -538,6 +538,7 @@ class AzureVoiceLiveAgent(Module):
         if et == ServerEventType.SESSION_UPDATED:
             logger.info("Voice Live session ready: %s", event.session.id)
             self._mic_active.set()
+            self.agent_idle.publish(True)
         elif et == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
             if self._playback is not None:
                 self._playback.skip_pending()

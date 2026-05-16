@@ -39,7 +39,7 @@ logger = setup_logger()
 
 
 class WebInputAudioOnly(WebInput):
-    """WebInput exposing audio_out (no STT). Typed text still flows via
+    """WebInput exposing web_audio (no STT). Typed text still flows via
     /human_input through the existing query_stream subscription."""
 
     _audio_subject: rx.subject.Subject
@@ -47,7 +47,7 @@ class WebInputAudioOnly(WebInput):
     _human_transport: pLCMTransport
     _thread: Thread
 
-    audio_out: Out[AudioEvent]
+    web_audio: Out[AudioEvent]
 
     @rpc
     def start(self) -> None:
@@ -58,10 +58,10 @@ class WebInputAudioOnly(WebInput):
         self._human_transport = pLCMTransport("/human_input")
         self._audio_subject = rx.subject.Subject()
 
-        audio_out_sub = self._audio_subject.subscribe(
-            on_next=self.audio_out.publish
+        web_audio_sub = self._audio_subject.subscribe(
+            on_next=self.web_audio.publish
         )
-        self.register_disposable(audio_out_sub)
+        self.register_disposable(web_audio_sub)
 
         self._web_interface = RobotWebInterface(
             port=5555,

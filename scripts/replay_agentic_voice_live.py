@@ -145,16 +145,23 @@ def post_wav(wav_path: Path) -> bool:
 
 
 class IdleSettleWaiter:
-    """Sets an internal Event once agent_idle has transitioned False then
-    stayed True for settle_ms continuously. The False-first requirement
-    prevents settling on a stale True state when the wav has been posted
-    but Voice Live VAD hasn't yet flipped the agent into a response."""
+    """Settles after agent_idle has been observed True for settle_ms.
+
+    Two modes:
+    - Initial (before first clear()): the first observed True is enough.
+      Used to wait for the Voice Live session-ready bootstrap.
+    - Per-turn (after clear()): a False transition is required before True
+      can settle. Prevents settling on a stale True between turns when the
+      wav has been posted but Voice Live VAD has not yet flipped the
+      agent into a response.
+    """
 
     def __init__(self, agent_idle_stream: Any, settle_ms: float) -> None:
         self._evt = threading.Event()
         self._settle_s = settle_ms / 1000.0
         self._timer: threading.Timer | None = None
         self._seen_false = False
+        self._false_required = False
         self._sub = agent_idle_stream.subscribe(self._on_idle)
 
     def _on_idle(self, is_idle: bool) -> None:
@@ -164,7 +171,7 @@ class IdleSettleWaiter:
                 self._timer = None
             self._seen_false = True
             return
-        if not self._seen_false:
+        if self._false_required and not self._seen_false:
             return
         if self._timer is not None:
             return
@@ -177,6 +184,7 @@ class IdleSettleWaiter:
             self._timer.cancel()
             self._timer = None
         self._seen_false = False
+        self._false_required = True
         self._evt.clear()
 
     def wait(self, timeout: float) -> bool:
