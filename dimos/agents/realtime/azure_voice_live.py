@@ -251,6 +251,11 @@ class AzureVoiceLiveConfig(ModuleConfig):
         )
     )
     sample_rate: int = 24000
+    # Voice Live は応答音声を自前で TTS するため、`speak` ツールを公開すると
+    # agent が会話のたびに呼び出して二重発話になる。SpeakSkill 自体は
+    # SecurityModule の侵入者アラート用に blueprint に残しつつ、agent からは
+    # 隠す。他のツールを隠したい場合はここに追加する。
+    excluded_tools: list[str] = Field(default_factory=lambda: ["speak"])
     # Tool names whose execution should be followed by a spoken result report.
     # Anything not in this set runs silently after a preface utterance.
     report_after_tools: set[str] = Field(
@@ -688,11 +693,15 @@ class AzureVoiceLiveAgent(Module):
                 f"MCP server not ready at {self.config.mcp_server_url}"
             )
         mcp_tools = self._mcp.list_tools()
-        self._tool_registry = {t["name"]: t for t in mcp_tools}
+        excluded = set(self.config.excluded_tools)
+        kept = [t for t in mcp_tools if t["name"] not in excluded]
+        skipped = [t["name"] for t in mcp_tools if t["name"] in excluded]
+        self._tool_registry = {t["name"]: t for t in kept}
         logger.info(
-            "Voice Live discovered %d MCP tools: %s",
-            len(mcp_tools),
-            [t["name"] for t in mcp_tools],
+            "Voice Live discovered %d MCP tools: %s (excluded: %s)",
+            len(kept),
+            [t["name"] for t in kept],
+            skipped,
         )
         self._start_ws_thread()
 
