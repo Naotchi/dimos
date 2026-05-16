@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 
+
 def _percentile(xs: list[float], q: float) -> float:
     if not xs:
         return float("nan")
@@ -60,55 +61,65 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def build_turns(jsonl_path: Path) -> dict[str, dict[str, Any]]:
-    """Group bench events by turn_id; bucket mcp_tool:* by timestamp range."""
+    """Group bench events by their currently-open turn.
+
+    Turns are strictly sequential (the replay script gates each new turn on
+    idle_event set by turn_done), so the analyzer can walk main.jsonl in emit
+    order and attribute every event after `user_audio_end` to that turn until
+    `turn_done` / `turn_timeout` closes it. No wall-clock matching needed.
+    """
     rows = _read_jsonl(jsonl_path)
     turns: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"llm_steps": [], "tools_steps": [], "mcp_tools": []}
+        lambda: {
+            "llm_steps": [],
+            "tools_steps": [],
+            "mcp_tools": [],
+            "speak_invokes": [],
+        }
     )
 
-    # First pass: events with turn_id.
+    current: str | None = None
     for row in rows:
-        turn_id = row.get("turn_id")
         kind = row.get("event_kind")
-        if not turn_id or not kind:
-            continue
         if kind == "user_audio_end":
-            turns[turn_id]["user_audio_end"] = row
-        elif kind == "stt_done":
-            turns[turn_id]["stt_done"] = row
-        elif kind == "llm_step":
-            turns[turn_id]["llm_steps"].append(row)
-        elif kind == "tools_step" or (kind.endswith("_step") and kind != "llm_step"):
-            turns[turn_id]["tools_steps"].append(row)
-        elif kind == "first_motion_tool":
-            turns[turn_id]["first_motion_tool"] = row
+            current = row.get("turn_id")
+            if current is None:
+                continue
+            turns[current]["user_audio_end"] = row
+            continue
+
+        if current is None:
+            # Event arrived before any turn was opened (shouldn't happen in
+            # well-formed logs, but be defensive).
+            continue
+
+        if kind == "stt_done":
+            turns[current].setdefault("stt_done", row)
+        elif kind in ("llm_step", "model_step"):
+            turns[current]["llm_steps"].append(row)
+        elif kind == "tools_step" or (
+            isinstance(kind, str)
+            and kind.endswith("_step")
+            and kind not in ("llm_step", "model_step")
+        ):
+            turns[current]["tools_steps"].append(row)
+        elif kind == "first_tool_call":
+            turns[current].setdefault("first_tool_call", row)
+        elif kind == "speak_invoke":
+            turns[current]["speak_invokes"].append(row)
         elif kind == "first_audio_out":
-            turns[turn_id]["first_audio_out"] = row
+            turns[current].setdefault("first_audio_out", row)
         elif kind == "turn_done":
-            turns[turn_id]["turn_done"] = row
+            turns[current]["turn_done"] = row
+            current = None
         elif kind == "turn_timeout":
-            turns[turn_id]["turn_timeout"] = row
-
-    # Second pass: bucket mcp_tool:* by timestamp range [user_audio_end.t, turn_done.t].
-    ranges = []
-    for turn_id, data in turns.items():
-        if "user_audio_end" in data and "turn_done" in data:
-            ranges.append((data["user_audio_end"]["t"], data["turn_done"]["t"], turn_id))
-    ranges.sort()
-
-    for row in rows:
-        if row.get("event") != "MCP tool done":
-            continue
-        t = row.get("t")
-        if t is None:
-            continue
-        for t0, t1, turn_id in ranges:
-            if t0 <= t <= t1:
-                duration = _parse_duration(row.get("duration"))
-                turns[turn_id]["mcp_tools"].append(
-                    {"tool": row.get("tool", "?"), "duration": duration, "t": t}
-                )
-                break
+            turns[current]["turn_timeout"] = row
+            current = None
+        elif row.get("event") == "MCP tool done":
+            duration = _parse_duration(row.get("duration"))
+            turns[current]["mcp_tools"].append(
+                {"tool": row.get("tool", "?"), "duration": duration}
+            )
 
     return dict(turns)
 
@@ -120,12 +131,21 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
         ue = data.get("user_audio_end")
         if not ue:
             continue
-        t0 = ue["t"]
+        # Events come from multiple processes with independent perf_counter
+        # epochs, so we use wall-clock timestamps (cached as _t0_wall /
+        # _ts_wall during build_turns) for cross-event subtractions.
+        t0 = ue["_t0_wall"]
 
         fao = data.get("first_audio_out")
         fmt = data.get("first_motion_tool")
         stt = data.get("stt_done")
         td = data.get("turn_done")
+
+        def _delta(row: dict[str, Any] | None) -> float | None:
+            if row is None:
+                return None
+            ts = row.get("_ts_wall")
+            return (ts - t0) if ts is not None else None
 
         llm_durations = [
             _parse_duration(s.get("duration_s")) or 0.0 for s in data.get("llm_steps", [])
@@ -139,16 +159,43 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
             "run_idx": ue.get("run_idx"),
             "warmup": bool(ue.get("warmup")),
             "audio_seconds": ue.get("audio_seconds"),
-            "e2e_response_s": (fao["t"] - t0) if fao else None,
-            "e2e_motion_s": (fmt["t"] - t0) if fmt else None,
+            "e2e_response_s": _delta(fao),
+            "e2e_motion_s": _delta(fmt),
             "stt_s": _parse_duration(stt.get("duration_s")) if stt else None,
             "llm_total_s": sum(llm_durations) if llm_durations else None,
             "tools_total_s": sum(tools_durations) if tools_durations else None,
             "turn_total_s": _parse_duration(td.get("duration_s")) if td else None,
             "n_mcp_tools": len(data.get("mcp_tools", [])),
+            "mcp_tools": data.get("mcp_tools", []),
             "timeout": "turn_timeout" in data,
         }
     return metrics
+
+
+def _is_concurrent_speak_motion(metric: dict[str, Any]) -> bool:
+    """Return True iff this turn has both speak and motion tool calls,
+    and the first speak invocation started before the last motion completion
+    (i.e. speak and motion overlap or speak comes first — system latency is
+    not inflated by waiting for motion to finish).
+
+    Uses wall-clock 't' (completion) and 'duration' from each mcp_tools entry;
+    invocation t = t - duration.
+    """
+    speak_invokes = []
+    motion_completes = []
+    for e in metric.get("mcp_tools", []):
+        t_done = e.get("t")
+        dur = e.get("duration")
+        if t_done is None:
+            continue
+        invoke_t = t_done - (dur or 0.0)
+        if e.get("tool") == "speak":
+            speak_invokes.append(invoke_t)
+        else:
+            motion_completes.append(t_done)
+    if not speak_invokes or not motion_completes:
+        return False
+    return min(speak_invokes) <= max(motion_completes)
 
 
 def _summarize(values: list[float | None]) -> dict[str, float]:
@@ -183,19 +230,53 @@ _METRIC_KEYS = (
     "turn_total_s",
 )
 
+# Per-category visible metrics. e2e_motion_s is NaN by design in speak_only.
+_CATEGORY_METRICS: dict[str, tuple[str, ...]] = {
+    "speak_only": (
+        "e2e_response_s",
+        "stt_s",
+        "llm_total_s",
+        "tools_total_s",
+        "turn_total_s",
+    ),
+    "concurrent": _METRIC_KEYS,
+    # legacy categories (older runs)
+    "motion_only": _METRIC_KEYS,
+    "both": _METRIC_KEYS,
+}
+
 
 def aggregate(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate non-warmup turns: overall + per category + mcp_tool:* tallies."""
+    """Aggregate non-warmup turns.
+
+    Returns:
+      by_category: per-category metrics, filtered to keys appropriate for that
+        category (see _CATEGORY_METRICS).
+      concurrent_parallel: metrics for the concurrent category restricted to
+        turns where speak and motion actually overlapped (system-perf view).
+    """
     live = [m for m in metrics.values() if not m["warmup"]]
 
-    overall = {k: _summarize([m.get(k) for m in live]) for k in _METRIC_KEYS}
-
-    by_cat: dict[str, dict[str, Any]] = defaultdict(dict)
-    for cat in {m.get("category") for m in live if m.get("category")}:
+    by_cat: dict[str, dict[str, Any]] = {}
+    for cat in sorted({m.get("category") for m in live if m.get("category")}):
         cat_metrics = [m for m in live if m.get("category") == cat]
-        by_cat[cat] = {k: _summarize([m.get(k) for m in cat_metrics]) for k in _METRIC_KEYS}
+        keys = _CATEGORY_METRICS.get(cat, _METRIC_KEYS)
+        by_cat[cat] = {
+            "n_turns": len(cat_metrics),
+            "metrics": {k: _summarize([m.get(k) for m in cat_metrics]) for k in keys},
+        }
 
-    return {"overall": overall, "by_category": dict(by_cat)}
+    concurrent_cat = [m for m in live if m.get("category") in ("concurrent", "both")]
+    parallel = [m for m in concurrent_cat if _is_concurrent_speak_motion(m)]
+    concurrent_parallel = {
+        "n_parallel": len(parallel),
+        "n_total": len(concurrent_cat),
+        "metrics": {k: _summarize([m.get(k) for m in parallel]) for k in _METRIC_KEYS}
+        if parallel
+        else None,
+    }
+
+    return {"by_category": by_cat, "concurrent_parallel": concurrent_parallel}
 
 
 def _pick_run(arg: str | None) -> Path:
@@ -239,9 +320,47 @@ def main(argv: list[str]) -> int:
     print(f"run: {run_dir}")
     print(f"turns analyzed (non-warmup): {len(live)} / {len(metrics)} total")
 
-    _print_table("overall", agg["overall"])
-    for cat, rows in sorted(agg["by_category"].items()):
-        _print_table(f"category: {cat}", rows)
+    # Headline SLO numbers: speak path + parallel concurrent path.
+    speak_cat = agg["by_category"].get("speak_only")
+    cp = agg["concurrent_parallel"]
+    print("\n== headline (system SLO) ==")
+    if speak_cat:
+        s = speak_cat["metrics"].get("e2e_response_s")
+        if s and s["n"]:
+            print(
+                f"speak_only.e2e_response_s   n={s['n']}  "
+                f"p50={s['p50']:.2f}s  p95={s['p95']:.2f}s"
+            )
+    if cp["metrics"] is not None:
+        r = cp["metrics"]["e2e_response_s"]
+        m = cp["metrics"]["e2e_motion_s"]
+        rate_pct = 100.0 * cp["n_parallel"] / max(cp["n_total"], 1)
+        print(
+            f"concurrent.e2e_response_s   n={r['n']}/{cp['n_total']} "
+            f"({rate_pct:.0f}% parallel)  p50={r['p50']:.2f}s  p95={r['p95']:.2f}s"
+        )
+        print(
+            f"concurrent.e2e_motion_s     n={m['n']}/{cp['n_total']} "
+            f"({rate_pct:.0f}% parallel)  p50={m['p50']:.2f}s  p95={m['p95']:.2f}s"
+        )
+    elif cp["n_total"]:
+        print(
+            f"concurrent: 0/{cp['n_total']} turns achieved parallel speak+motion"
+        )
+
+    # Per-category detail tables.
+    for cat, data in agg["by_category"].items():
+        _print_table(
+            f"category: {cat} (n={data['n_turns']})",
+            data["metrics"],
+        )
+
+    # System-perf view: concurrent-category turns where speak+motion overlapped.
+    if cp["metrics"] is not None:
+        _print_table(
+            f"concurrent (parallel turns only, n={cp['n_parallel']}/{cp['n_total']})",
+            cp["metrics"],
+        )
 
     # Per-tool mcp_tool:* summary across all live turns.
     tool_buckets: dict[str, list[float]] = defaultdict(list)

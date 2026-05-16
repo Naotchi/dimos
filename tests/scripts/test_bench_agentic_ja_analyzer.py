@@ -1,11 +1,17 @@
-"""Unit tests for the bench_agentic_ja analyzer."""
+"""Tests for the agentic_ja bench analyzer (state-machine variant)."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
 
-from scripts.bench_agentic_ja import (
+import sys
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+from bench_agentic_ja import (  # noqa: E402
     _percentile,
     aggregate,
     build_turns,
@@ -13,88 +19,80 @@ from scripts.bench_agentic_ja import (
 )
 
 
-def _line(d):
+def _line(d: dict) -> str:
     return json.dumps(d) + "\n"
 
 
 @pytest.fixture
 def jsonl_path(tmp_path: Path) -> Path:
-    """Two turns: one with both speak and motion, one with only speak."""
-    p = tmp_path / "main.jsonl"
+    """Three turns:
+
+    - A (live, speak in round 0):     user_audio_end -> stt_done -> first_tool_call(speak)
+                                      -> speak_invoke -> first_audio_out -> turn_done
+    - B (live, motion-only, no speak): user_audio_end -> first_tool_call(execute_sport_command)
+                                       -> turn_done
+    - C (warmup, speak): same shape as A but warmup=True
+    """
+    path = tmp_path / "main.jsonl"
     lines = [
-        # Turn A: speak + motion, NOT warmup
-        _line({"event_kind": "user_audio_end", "turn_id": "A", "t": 100.0,
-               "fixture_id": "fx1", "category": "both", "run_idx": 0, "warmup": False,
-               "audio_seconds": 1.2}),
-        _line({"event_kind": "stt_done", "turn_id": "A", "t": 100.3,
-               "duration_s": 0.3, "audio_seconds": 1.2, "text_len": 5}),
-        _line({"event_kind": "llm_step", "turn_id": "A", "t": 100.9,
-               "duration_s": 0.6, "node": "agent", "step_idx": 0, "n_messages": 1}),
-        _line({"event_kind": "first_motion_tool", "turn_id": "A", "t": 100.95, "tool": "move"}),
-        _line({"event_kind": "tools_step", "turn_id": "A", "t": 101.0,
-               "duration_s": 0.05, "node": "tools", "step_idx": 1, "n_messages": 1}),
-        _line({"event_kind": "first_audio_out", "turn_id": "A", "t": 101.1, "tool": "speak"}),
-        # Upstream mcp_tool events have no turn_id; bucketed by timestamp.
-        _line({"event": "MCP tool done", "t": 101.05, "tool": "move", "duration": 0.04}),
-        _line({"event_kind": "turn_done", "turn_id": "A", "t": 101.5,
-               "duration_s": 1.5, "llm_s": 0.6, "n_steps": 2, "n_tool_calls": 1}),
+        # --- Turn A: live, speak in round 0 ---
+        _line({"event_kind": "user_audio_end", "turn_id": "A", "t": 0.0,
+               "fixture_id": "fx_01", "run_idx": 0, "warmup": False,
+               "audio_seconds": 1.0}),
+        _line({"event_kind": "stt_done", "turn_id": None, "duration_s": 0.4}),
+        _line({"event_kind": "first_tool_call", "turn_id": None, "t": 0.7, "tool": "speak"}),
+        _line({"event_kind": "llm_step", "turn_id": None, "duration_s": 0.5,
+               "node": "model", "step_idx": 0, "n_messages": 1}),
+        _line({"event_kind": "speak_invoke", "turn_id": None, "t": 0.75}),
+        _line({"event_kind": "first_audio_out", "turn_id": None, "t": 0.95, "tool": "speak"}),
+        _line({"event_kind": "tools_step", "turn_id": None, "duration_s": 0.1,
+               "node": "tools", "step_idx": 1, "n_messages": 1}),
+        _line({"event_kind": "turn_done", "turn_id": None, "duration_s": 1.0,
+               "llm_s": 0.5, "n_steps": 2, "n_tool_calls": 1}),
 
-        # Turn B: speak only, IS warmup
-        _line({"event_kind": "user_audio_end", "turn_id": "B", "t": 200.0,
-               "fixture_id": "fx2", "category": "speak_only", "run_idx": 0, "warmup": True,
+        # --- Turn B: live, motion-only, no speak ---
+        _line({"event_kind": "user_audio_end", "turn_id": "B", "t": 0.0,
+               "fixture_id": "fx_09", "run_idx": 0, "warmup": False,
                "audio_seconds": 0.8}),
-        _line({"event_kind": "stt_done", "turn_id": "B", "t": 200.2,
-               "duration_s": 0.2, "audio_seconds": 0.8, "text_len": 3}),
-        _line({"event_kind": "llm_step", "turn_id": "B", "t": 200.7,
-               "duration_s": 0.5, "node": "agent", "step_idx": 0, "n_messages": 1}),
-        _line({"event_kind": "first_audio_out", "turn_id": "B", "t": 200.8, "tool": "speak"}),
-        _line({"event_kind": "turn_done", "turn_id": "B", "t": 201.0,
-               "duration_s": 1.0, "llm_s": 0.5, "n_steps": 1, "n_tool_calls": 0}),
+        _line({"event_kind": "stt_done", "turn_id": None, "duration_s": 0.3}),
+        _line({"event_kind": "first_tool_call", "turn_id": None, "t": 0.6,
+               "tool": "execute_sport_command"}),
+        _line({"event_kind": "llm_step", "turn_id": None, "duration_s": 0.4,
+               "node": "model", "step_idx": 0, "n_messages": 1}),
+        _line({"event_kind": "tools_step", "turn_id": None, "duration_s": 0.05,
+               "node": "tools", "step_idx": 1, "n_messages": 1}),
+        _line({"event_kind": "turn_done", "turn_id": None, "duration_s": 0.7,
+               "llm_s": 0.4, "n_steps": 2, "n_tool_calls": 1}),
+
+        # --- Turn C: warmup, speak ---
+        _line({"event_kind": "user_audio_end", "turn_id": "C", "t": 0.0,
+               "fixture_id": "fx_01", "run_idx": 0, "warmup": True,
+               "audio_seconds": 1.0}),
+        _line({"event_kind": "stt_done", "turn_id": None, "duration_s": 0.4}),
+        _line({"event_kind": "first_tool_call", "turn_id": None, "t": 0.7, "tool": "speak"}),
+        _line({"event_kind": "speak_invoke", "turn_id": None, "t": 0.75}),
+        _line({"event_kind": "first_audio_out", "turn_id": None, "t": 0.95, "tool": "speak"}),
+        _line({"event_kind": "turn_done", "turn_id": None, "duration_s": 1.0,
+               "llm_s": 0.5, "n_steps": 2, "n_tool_calls": 1}),
     ]
-    p.write_text("".join(lines))
-    return p
+    path.write_text("".join(lines))
+    return path
 
 
-def test_build_turns_groups_by_turn_id(jsonl_path):
+def test_build_turns_state_machine_groups_by_open_turn(jsonl_path: Path) -> None:
     turns = build_turns(jsonl_path)
-    assert set(turns.keys()) == {"A", "B"}
-    assert turns["A"]["user_audio_end"]["fixture_id"] == "fx1"
-    assert turns["A"]["first_motion_tool"]["tool"] == "move"
-    # mcp_tool:* gets bucketed by timestamp.
-    assert any(e["tool"] == "move" for e in turns["A"]["mcp_tools"])
+    assert set(turns.keys()) == {"A", "B", "C"}
 
+    a = turns["A"]
+    assert a["user_audio_end"]["fixture_id"] == "fx_01"
+    assert a["first_tool_call"]["tool"] == "speak"
+    assert len(a["speak_invokes"]) == 1
+    assert a["first_audio_out"]["t"] == 0.95
+    assert len(a["llm_steps"]) == 1
+    assert len(a["tools_steps"]) == 1
+    assert a["turn_done"]["duration_s"] == 1.0
 
-def test_compute_per_turn_metrics(jsonl_path):
-    turns = build_turns(jsonl_path)
-    metrics = compute_per_turn_metrics(turns)
-    a = metrics["A"]
-    assert a["e2e_response_s"] == pytest.approx(1.1)
-    assert a["e2e_motion_s"] == pytest.approx(0.95)
-    assert a["stt_s"] == pytest.approx(0.3)
-    assert a["llm_total_s"] == pytest.approx(0.6)
-    assert a["warmup"] is False
-    assert a["category"] == "both"
-
-    b = metrics["B"]
-    assert b["e2e_response_s"] == pytest.approx(0.8)
-    assert b["e2e_motion_s"] is None
-    assert b["warmup"] is True
-
-
-def test_aggregate_drops_warmup(jsonl_path):
-    turns = build_turns(jsonl_path)
-    metrics = compute_per_turn_metrics(turns)
-    agg = aggregate(metrics)
-    # Only turn A (non-warmup) contributes.
-    assert agg["overall"]["e2e_response_s"]["n"] == 1
-    assert agg["overall"]["e2e_motion_s"]["n"] == 1
-    assert "speak_only" not in agg["by_category"]  # warmup-only category dropped
-    assert agg["by_category"]["both"]["e2e_response_s"]["n"] == 1
-
-
-def test_percentile_basic():
-    import math
-    assert _percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) == 3.0
-    assert _percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.95) == 5.0
-    # Empty list → NaN (NaN != NaN)
-    assert math.isnan(_percentile([], 0.5))
+    b = turns["B"]
+    assert b["first_tool_call"]["tool"] == "execute_sport_command"
+    assert "first_audio_out" not in b
+    assert b["speak_invokes"] == []
