@@ -24,9 +24,10 @@ from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial import unitree
 from dimos.robot.unitree.go2.connection import GO2Connection
 from dimos.robot.unitree.unitree_skill_container import UnitreeSkillContainer
 
-# SpeakSkill は SecurityModule の侵入者検知アラート用に必要 (Voice Live の
-# 会話 TTS とは別経路)。Voice Live は agent の発話を自前で TTS するため、
-# SpeakSkill が agent Out を二重に喋ることはない。
+# SpeakSkill は SecurityModule の侵入者検知アラート用 (Voice Live の会話 TTS
+# とは別経路)。`speak` は MCP tool として公開されると agent が会話のたびに
+# 呼び二重発話になるため、AzureVoiceLiveAgent 側で excluded_tools により
+# デフォルトで agent から隠している。SecurityModule は Spec 注入経由で直接呼ぶ。
 unitree_go2_agentic_voice_live = autoconnect(
     unitree_go2_spatial,
     McpServer.blueprint(),

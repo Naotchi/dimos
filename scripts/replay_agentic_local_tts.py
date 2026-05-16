@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Replay wav fixtures through the unitree_go2_agentic_ja blueprint.
+"""Replay wav fixtures through the unitree_go2_agentic_local_tts blueprint.
 
 Boots the blueprint in-process, then uses the existing /upload_audio HTTP
 endpoint (served by RobotWebInterface on port 5555, same endpoint the WebUI
@@ -11,7 +11,7 @@ After publishing each wav we emit a `user_audio_end` bench event so the
 analyzer can compute end-to-end latencies relative to that timestamp.
 
 Usage:
-    python scripts/replay_agentic_ja.py \
+    python scripts/replay_agentic_local_tts.py \
         --fixtures tests/bench_fixtures/agentic_ja/fixtures.yaml \
         --runs 3 --warmup 1
 """
@@ -34,8 +34,8 @@ from dimos.agents.bench_ja import log_bench_event, new_turn, reset
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.core.global_config import global_config
-from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_ja import (
-    unitree_go2_agentic_ja,
+from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
+    unitree_go2_agentic_local_tts,
 )
 from dimos.utils.logging_config import set_run_log_dir
 
@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--out",
         default=None,
-        help="Override log run dir (default: logs/{ts}-bench-agentic-ja).",
+        help="Override log run dir (default: logs/{ts}-bench-agentic-local-tts).",
     )
     return p.parse_args()
 
@@ -91,7 +91,7 @@ def configure_log_dir(out_override: str | None) -> Path:
         path = Path(out_override)
     else:
         ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-        path = Path("logs") / f"{ts}-bench-agentic-ja"
+        path = Path("logs") / f"{ts}-bench-agentic-local-tts"
     path.mkdir(parents=True, exist_ok=True)
     set_run_log_dir(path)
     return path
@@ -99,7 +99,7 @@ def configure_log_dir(out_override: str | None) -> Path:
 
 def boot_blueprint() -> tuple[ModuleCoordinator, TimedMcpClient]:
     """Build the blueprint; return coordinator and the (proxy) mcp_client."""
-    coordinator = ModuleCoordinator.build(unitree_go2_agentic_ja, blueprint_args={})
+    coordinator = ModuleCoordinator.build(unitree_go2_agentic_local_tts, blueprint_args={})
     # JapaneseWebInput runs in a worker subprocess; we reach it via /upload_audio.
     # We still need TimedMcpClient.agent_idle (cross-process Out works via dimos
     # streams; the subscribe below pulls events back to this process).
