@@ -33,6 +33,7 @@ import yaml
 from dimos.agents.bench_ja import log_bench_event, new_turn, reset
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
+from dimos.core.global_config import global_config
 from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_ja import (
     unitree_go2_agentic_ja,
 )
@@ -48,6 +49,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=1)
     p.add_argument("--shuffle", action="store_true")
+    p.add_argument(
+        "--simulation",
+        action="store_true",
+        help="Run blueprint against MuJoCo (sets global_config.simulation=True).",
+    )
     p.add_argument("--turn-timeout", type=float, default=30.0)
     p.add_argument("--initial-idle-timeout", type=float, default=60.0)
     p.add_argument(
@@ -128,8 +134,13 @@ def post_wav(wav_path: Path) -> bool:
 
 def main() -> int:
     args = parse_args()
+    if args.simulation:
+        global_config.update(simulation=True)
     out_dir = configure_log_dir(args.out)
-    print(f"[replay] logging to {out_dir}", flush=True)
+    print(
+        f"[replay] logging to {out_dir} (connection={global_config.unitree_connection_type})",
+        flush=True,
+    )
 
     fx_path = Path(args.fixtures)
     manifest = yaml.safe_load(fx_path.read_text())
@@ -153,24 +164,37 @@ def main() -> int:
         coordinator.stop()
         return 2
 
-    print("[replay] waiting for initial agent_idle...", flush=True)
-    if not idle_event.wait(timeout=args.initial_idle_timeout):
-        print("[replay] timed out waiting for initial agent_idle", file=sys.stderr)
-        coordinator.stop()
-        return 2
+    # NOTE: agent_idle is only published after the first turn completes
+    # (see TimedMcpClient._process_message), so we cannot wait for an
+    # "initial idle" here — we just send the first wav once the web
+    # interface is up, then wait for idle between subsequent wavs.
 
     schedule = list(fixture_iter(fixtures, args.runs, args.warmup, args.shuffle))
     print(f"[replay] {len(schedule)} runs scheduled", flush=True)
 
-    for fx in schedule:
-        idle_event.clear()
-        if not idle_event.wait(timeout=args.turn_timeout):
-            print(f"[replay] WARN: idle wait timed out before fx {fx['id']}", file=sys.stderr)
+    for i, fx in enumerate(schedule):
+        if i > 0:
+            if not idle_event.wait(timeout=args.turn_timeout):
+                print(f"[replay] WARN: idle wait timed out before fx {fx['id']}", file=sys.stderr)
+            idle_event.clear()
 
         wav_path = fx_path.parent / fx["wav"]
         audio_seconds = wav_seconds(wav_path)
 
-        idle_event.clear()
+        # t=0: about to hand the wav to /upload_audio. We log BEFORE post_wav
+        # because the upload handler runs the STT pipeline synchronously
+        # (audio_subject.on_next), so post_wav blocks until stt_done is
+        # already emitted; logging after would invert the timeline.
+        reset()
+        new_turn()
+        log_bench_event(
+            "user_audio_end",
+            audio_seconds=audio_seconds,
+            fixture_id=fx["id"],
+            run_idx=fx["run_idx"],
+            warmup=fx["warmup"],
+        )
+
         ok = post_wav(wav_path)
         if not ok:
             log_bench_event(
@@ -179,19 +203,6 @@ def main() -> int:
                 run_idx=fx["run_idx"],
             )
             continue
-
-        # t=0: upload request has completed; the wav is now flowing into the
-        # in-subprocess audio pipeline.
-        reset()
-        new_turn()
-        log_bench_event(
-            "user_audio_end",
-            audio_seconds=audio_seconds,
-            fixture_id=fx["id"],
-            category=fx["category"],
-            run_idx=fx["run_idx"],
-            warmup=fx["warmup"],
-        )
 
         if not idle_event.wait(timeout=args.turn_timeout):
             print(f"[replay] WARN: turn {fx['id']} timed out", file=sys.stderr)
