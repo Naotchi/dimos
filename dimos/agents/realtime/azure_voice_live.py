@@ -35,12 +35,15 @@ from azure.ai.voicelive.models import (
     AudioEchoCancellation,
     AudioNoiseReduction,
     AzureStandardVoice,
+    FunctionCallOutputItem,
     InputAudioFormat,
+    InputTextContentPart,
     Modality,
     OutputAudioFormat,
     RequestSession,
     ServerEventType,
     ServerVad,
+    UserMessageItem,
 )
 from azure.core.credentials import AzureKeyCredential
 
@@ -69,6 +72,15 @@ _ENV_PREFIX = "DIMOS_AZURE_VOICE_LIVE_"
 class _PlaybackPacket:
     seq: int
     data: bytes | None  # None = end-of-stream sentinel
+
+
+@dataclass
+class _ResponseSnapshot:
+    """Per-response state captured at RESPONSE_DONE before resetting."""
+    trigger: str  # "user" | "tool_result" | "preface_forced"
+    had_audio: bool
+    pending_calls: list[tuple[str, str, str]]  # (call_id, name, args_json)
+    text: str
 
 
 class _VoicePlayback:
@@ -195,6 +207,14 @@ def _extract_tool_text(result: dict[str, Any]) -> str:
     return text
 
 
+def _parse_tool_set(env_name: str, default: set[str]) -> set[str]:
+    """Parse a comma-separated env var into a set, returning ``default`` if unset."""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
 class AzureVoiceLiveConfig(ModuleConfig):
     endpoint: str = Field(
         default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}ENDPOINT", "")
@@ -231,6 +251,19 @@ class AzureVoiceLiveConfig(ModuleConfig):
         )
     )
     sample_rate: int = 24000
+    # Voice Live は応答音声を自前で TTS するため、`speak` ツールを公開すると
+    # agent が会話のたびに呼び出して二重発話になる。SpeakSkill 自体は
+    # SecurityModule の侵入者アラート用に blueprint に残しつつ、agent からは
+    # 隠す。他のツールを隠したい場合はここに追加する。
+    excluded_tools: list[str] = Field(default_factory=lambda: ["speak"])
+    # Tool names whose execution should be followed by a spoken result report.
+    # Anything not in this set runs silently after a preface utterance.
+    report_after_tools: set[str] = Field(
+        default_factory=lambda: _parse_tool_set(
+            f"{_ENV_PREFIX}REPORT_AFTER_TOOLS",
+            {"observe", "current_time"},
+        )
+    )
 
 
 class AzureVoiceLiveAgent(Module):
@@ -240,9 +273,10 @@ class AzureVoiceLiveAgent(Module):
     agent: Out[BaseMessage]
     human_input: In[str]
     web_audio: In[AudioEvent]
+    mic_gate: In[bool]
     agent_idle: Out[bool]
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, ptt_mode: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._tool_pool: ThreadPoolExecutor | None = None
         self._mcp: McpAdapter | None = None
@@ -253,14 +287,20 @@ class AzureVoiceLiveAgent(Module):
         self._conn: Any = None  # VoiceLiveConnection at runtime
         self._playback: _VoicePlayback | None = None
         self._mic_active = threading.Event()
-        self._response_active = False
-        self._response_text_buf: list[str] = []
+        self._ptt_mode = ptt_mode
+        self._resp_had_audio: bool = False
+        self._resp_pending_calls: list[tuple[str, str, str]] = []
+        self._resp_text_buf: list[str] = []
+        self._resp_trigger: str = "user"
+        self._next_trigger: str | None = None
+        self._resp_done_event: asyncio.Event | None = None
         self._first_audio_emitted = False
         self._first_tool_call_emitted = False
         self._mic: SounddeviceAudioSource | None = None
         self._mic_subscription: Any = None
         self._web_audio_sub: Any = None
         self._human_input_sub: Any = None
+        self._mic_gate_sub: Any = None
         self._tool_stream_cleanup: Any = None
 
     @rpc
@@ -298,6 +338,10 @@ class AzureVoiceLiveAgent(Module):
         self._playback.start()
         self._human_input_sub = self.human_input.subscribe(self._on_human_text)
         self.register_disposable(Disposable(self._human_input_sub))
+        self._mic_gate_sub = Disposable(
+            self.mic_gate.subscribe(self._on_mic_gate)
+        )
+        self.register_disposable(self._mic_gate_sub)
         self._tool_stream_cleanup = tool_stream.subscribe(
             self._on_tool_stream_message
         )
@@ -364,48 +408,6 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 logger.exception("Voice Live event handler error")
 
-    def _dispatch_function_call(
-        self, call_id: str, name: str, arguments: str
-    ) -> None:
-        if self._tool_pool is None or self._mcp is None:
-            return
-        self._tool_pool.submit(self._run_function_call, call_id, name, arguments)
-
-    def _run_function_call(
-        self, call_id: str, name: str, arguments: str
-    ) -> None:
-        assert self._mcp is not None
-        try:
-            args = json.loads(arguments) if arguments else {}
-        except Exception as exc:  # noqa: BLE001
-            output = f"Error: invalid arguments JSON: {exc}"
-            self._send_function_output(call_id, output)
-            return
-        try:
-            result = self._mcp.call_tool(name, args)
-            output = _extract_tool_text(result)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("MCP tool %s failed", name)
-            output = f"Error: {exc}"
-        self._send_function_output(call_id, output)
-
-    def _send_function_output(self, call_id: str, output: str) -> None:
-        if self._loop is None or self._conn is None:
-            logger.warning("send_function_output before WS ready; dropping")
-            return
-
-        async def _send() -> None:
-            await self._conn.conversation.item.create(
-                item={
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                }
-            )
-            await self._conn.response.create()
-
-        asyncio.run_coroutine_threadsafe(_send(), self._loop)
-
     def _send_user_text(self, text: str, prompt_response: bool = True) -> None:
         if self._loop is None or self._conn is None:
             logger.warning("user text dropped: WS not ready (%r)", text)
@@ -413,11 +415,7 @@ class AzureVoiceLiveAgent(Module):
 
         async def _send() -> None:
             await self._conn.conversation.item.create(
-                item={
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": text}],
-                }
+                item=UserMessageItem(content=[InputTextContentPart(text=text)])
             )
             if prompt_response:
                 await self._conn.response.create()
@@ -514,14 +512,30 @@ class AzureVoiceLiveAgent(Module):
         self._send_user_text(injected, prompt_response=False)
         self.agent.publish(HumanMessage(content=injected))
 
+    def _on_mic_gate(self, active: bool) -> None:
+        if active:
+            self._mic_active.set()
+        else:
+            self._mic_active.clear()
+
+    def _maybe_activate_mic_on_session_ready(self) -> None:
+        # In PTT mode (ptt_mode=True), the mic_gate input owns _mic_active —
+        # leave it cleared so audio only flows while the user holds SPACE.
+        if not self._ptt_mode:
+            self._mic_active.set()
+        self.agent_idle.publish(True)
+
     def _on_mic_audio(self, event: Any) -> None:
-        if not self._mic_active.is_set():
-            return
         if self._loop is None or self._conn is None:
             return
         target_sr = self.config.sample_rate
         int16_event = event.to_int16()
         samples = int16_event.data
+        # Keep the stream continuous so the server VAD sees speech→silence
+        # transitions: substitute zeros when the gate is closed instead of
+        # halting publication.
+        if not self._mic_active.is_set():
+            samples = np.zeros_like(samples)
         if int16_event.sample_rate != target_sr:
             resampled = resample_poly(
                 samples, up=target_sr, down=int16_event.sample_rate
@@ -533,54 +547,163 @@ class AzureVoiceLiveAgent(Module):
             self._conn.input_audio_buffer.append(audio=b64), self._loop
         )
 
+    def _snapshot_response_state(self) -> _ResponseSnapshot:
+        snap = _ResponseSnapshot(
+            trigger=self._resp_trigger,
+            had_audio=self._resp_had_audio,
+            pending_calls=list(self._resp_pending_calls),
+            text="".join(self._resp_text_buf).strip(),
+        )
+        self._resp_had_audio = False
+        self._resp_pending_calls = []
+        self._resp_text_buf = []
+        self._resp_trigger = "user"
+        return snap
+
+    def _invoke_mcp(self, name: str, arguments_json: str) -> str:
+        assert self._mcp is not None
+        try:
+            args = json.loads(arguments_json) if arguments_json else {}
+        except Exception as exc:  # noqa: BLE001
+            return f"Error: invalid arguments JSON: {exc}"
+        try:
+            result = self._mcp.call_tool(name, args)
+            return _extract_tool_text(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("MCP tool %s failed", name)
+            return f"Error: {exc}"
+
+    async def _force_preface(
+        self, pending_calls: list[tuple[str, str, str]]
+    ) -> None:
+        if pending_calls:
+            names = ", ".join(name for _, name, _ in pending_calls)
+            instructions = (
+                f"これから {names} を実行することを、"
+                f"日本語で1〜2語の短い音声で伝えてください。ツールは呼ばない。"
+            )
+        else:
+            instructions = "ユーザに日本語で短く一言返事をしてください。"
+
+        self._next_trigger = "preface_forced"
+        self._resp_done_event = asyncio.Event()
+        await self._conn.response.create(
+            response={
+                "modalities": ["audio", "text"],
+                "instructions": instructions,
+            }
+        )
+        await self._resp_done_event.wait()
+        self._resp_done_event = None
+
+    async def _dispatch_and_wait(
+        self, call_id: str, name: str, arguments_json: str
+    ) -> None:
+        assert self._loop is not None and self._tool_pool is not None
+        output = await self._loop.run_in_executor(
+            self._tool_pool, self._invoke_mcp, name, arguments_json
+        )
+        await self._conn.conversation.item.create(
+            item=FunctionCallOutputItem(call_id=call_id, output=output)
+        )
+        if name in self.config.report_after_tools:
+            self._next_trigger = "tool_result"
+            self._resp_done_event = asyncio.Event()
+            await self._conn.response.create(
+                response={
+                    "modalities": ["audio", "text"],
+                    "instructions": (
+                        "直前のツール結果を日本語で1文に要約して"
+                        "音声で報告してください。"
+                    ),
+                }
+            )
+            await self._resp_done_event.wait()
+            self._resp_done_event = None
+        # Silent path: no response.create — session waits for next user input.
+
+    async def _on_response_done(self, snap: _ResponseSnapshot) -> None:
+        try:
+            if not snap.had_audio:
+                await self._force_preface(snap.pending_calls)
+            for call_id, name, args in snap.pending_calls:
+                await self._dispatch_and_wait(call_id, name, args)
+        except Exception:
+            logger.exception("_on_response_done failed")
+        finally:
+            self.agent_idle.publish(True)
+
     async def _handle_event(self, event: Any) -> None:
         et = event.type
         if et == ServerEventType.SESSION_UPDATED:
             logger.info("Voice Live session ready: %s", event.session.id)
-            self._mic_active.set()
-            self.agent_idle.publish(True)
+            self._maybe_activate_mic_on_session_ready()
         elif et == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
             if self._playback is not None:
                 self._playback.skip_pending()
-            if self._response_active and self._conn is not None:
+            if self._conn is not None:
                 try:
                     await self._conn.response.cancel()
                 except Exception as exc:  # noqa: BLE001
                     if "no active response" not in str(exc).lower():
                         logger.warning("response.cancel failed: %s", exc)
+            # Release any pending serialization waiter so dispatch can unwind.
+            if self._resp_done_event is not None:
+                self._resp_done_event.set()
+            self._resp_pending_calls = []
             self.agent_idle.publish(False)
+        elif et == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED:
+            transcript = (getattr(event, "transcript", "") or "").strip()
+            if transcript:
+                logger.info("user: %s", transcript)
+                self.agent.publish(HumanMessage(content=transcript))
         elif et == ServerEventType.RESPONSE_CREATED:
-            self._response_active = True
-            self._response_text_buf = []
+            self._resp_trigger = self._next_trigger or "user"
+            self._next_trigger = None
+            self._resp_had_audio = False
+            self._resp_pending_calls = []
+            self._resp_text_buf = []
             self.agent_idle.publish(False)
         elif et == ServerEventType.RESPONSE_AUDIO_DELTA:
             if not self._first_audio_emitted:
                 log_bench_event("first_audio_out")
                 self._first_audio_emitted = True
+            self._resp_had_audio = True
             if self._playback is not None:
                 self._playback.enqueue(event.delta)
         elif et == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA:
-            self._response_text_buf.append(event.delta or "")
+            self._resp_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_TEXT_DELTA:
-            self._response_text_buf.append(event.delta or "")
+            self._resp_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE:
             if not self._first_tool_call_emitted:
                 log_bench_event("first_tool_call", tool=event.name)
                 self._first_tool_call_emitted = True
-            self._dispatch_function_call(
-                call_id=event.call_id,
-                name=event.name,
-                arguments=event.arguments,
+            self._resp_pending_calls.append(
+                (event.call_id, event.name, event.arguments)
             )
         elif et == ServerEventType.RESPONSE_DONE:
-            text = "".join(self._response_text_buf).strip()
-            if text:
-                self.agent.publish(AIMessage(content=text))
-            self._response_text_buf = []
-            self._response_active = False
-            self.agent_idle.publish(True)
+            snap = self._snapshot_response_state()
+            if snap.text:
+                logger.info("assistant: %s", snap.text)
+                self.agent.publish(AIMessage(content=snap.text))
+            # Release any serialization waiter (preface/tool_result responses).
+            if self._resp_done_event is not None:
+                self._resp_done_event.set()
+            if snap.trigger == "user":
+                asyncio.create_task(self._on_response_done(snap))
+            else:
+                # preface_forced / tool_result: finalize only, no further routing.
+                self.agent_idle.publish(True)
         elif et == ServerEventType.ERROR:
-            logger.error("Voice Live error: %s", event.error.message)
+            msg = event.error.message or ""
+            # SPEECH_STARTED 時に毎回 response.cancel を叩くため、active な
+            # response が無い場合の "Cancellation failed" がノイズとして頻発
+            # する。動作には影響しないので debug に降格。
+            if "no active response" in msg.lower():
+                logger.debug("Voice Live error (ignored): %s", msg)
+            else:
+                logger.error("Voice Live error: %s", msg)
         else:
             logger.debug("Voice Live unhandled event: %s", et)
 
@@ -592,11 +715,15 @@ class AzureVoiceLiveAgent(Module):
                 f"MCP server not ready at {self.config.mcp_server_url}"
             )
         mcp_tools = self._mcp.list_tools()
-        self._tool_registry = {t["name"]: t for t in mcp_tools}
+        excluded = set(self.config.excluded_tools)
+        kept = [t for t in mcp_tools if t["name"] not in excluded]
+        skipped = [t["name"] for t in mcp_tools if t["name"] in excluded]
+        self._tool_registry = {t["name"]: t for t in kept}
         logger.info(
-            "Voice Live discovered %d MCP tools: %s",
-            len(mcp_tools),
-            [t["name"] for t in mcp_tools],
+            "Voice Live discovered %d MCP tools: %s (excluded: %s)",
+            len(kept),
+            [t["name"] for t in kept],
+            skipped,
         )
         self._start_ws_thread()
 

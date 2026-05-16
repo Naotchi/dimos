@@ -2,8 +2,10 @@
 **/*.ignore
 **/*.ignore.*
 
-# Obsidian vault metadata (docs/ is a personal vault)
-.obsidian/
+# Obsidian vault: docs/ is a team vault — track config, ignore personal workspace state
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json
+**/.obsidian/workspace.json.bak
 
 # Personal notes kept out of the fork
 docs/private/

@@ -1,11 +1,10 @@
 #!/usr/bin/env python
-"""Aggregate end-to-end latency from a unitree-go2-agentic-ja bench run.
+"""Aggregate end-to-end latency from a unitree-go2-agentic-local-tts bench run.
 
 Usage:
-    python scripts/bench_agentic_ja.py [logs/<run-dir>] [--json FILE]
+    python scripts/bench_agentic_local_tts.py [logs/<run-dir>] [--json FILE]
 
-Without a run-dir argument, picks the latest logs/*-bench-agentic-ja/, then
-falls back to logs/*-unitree-go2-agentic-ja/ for backward compatibility.
+Without a run-dir argument, picks the latest logs/*-bench-agentic-local-tts/.
 
 Reads main.jsonl and prints per-turn end-to-end latencies and stage breakdown:
   - agent_first_call_s  (user_audio_end -> first_tool_call)
@@ -212,7 +211,7 @@ def _summarize(values: list[float | None]) -> dict[str, float]:
     }
 
 
-_AGENTIC_JA_METRIC_KEYS = (
+_AGENTIC_LOCAL_TTS_METRIC_KEYS = (
     "e2e_first_audio_s",
     "agent_first_call_s",
     "speak_tts_s",
@@ -229,20 +228,20 @@ _VOICE_LIVE_METRIC_KEYS = (
 
 
 def detect_mode(run_dir: Path) -> str:
-    """Infer 'agentic-ja' or 'voice-live' from the run-dir basename."""
+    """Infer 'agentic-local-tts' or 'voice-live' from the run-dir basename."""
     name = Path(run_dir).name
     if "voice-live" in name:
         return "voice-live"
-    return "agentic-ja"
+    return "agentic-local-tts"
 
 
 def _metric_keys_for_mode(mode: str) -> tuple[str, ...]:
     if mode == "voice-live":
         return _VOICE_LIVE_METRIC_KEYS
-    return _AGENTIC_JA_METRIC_KEYS
+    return _AGENTIC_LOCAL_TTS_METRIC_KEYS
 
 
-def aggregate(metrics: dict[str, dict[str, Any]], mode: str = "agentic-ja") -> dict[str, Any]:
+def aggregate(metrics: dict[str, dict[str, Any]], mode: str = "agentic-local-tts") -> dict[str, Any]:
     """Aggregate non-warmup turns into a single pool.
 
     Returns the count of live turns and a per-metric summary
@@ -259,11 +258,9 @@ def aggregate(metrics: dict[str, dict[str, Any]], mode: str = "agentic-ja") -> d
 def _pick_run(arg: str | None) -> Path:
     if arg:
         return Path(arg)
-    candidates = sorted(Path("logs").glob("*-bench-agentic-ja"))
+    candidates = sorted(Path("logs").glob("*-bench-agentic-local-tts"))
     if not candidates:
-        candidates = sorted(Path("logs").glob("*-unitree-go2-agentic-ja"))
-    if not candidates:
-        sys.exit("no logs/*-bench-agentic-ja or logs/*-unitree-go2-agentic-ja runs found")
+        sys.exit("no logs/*-bench-agentic-local-tts runs found")
     return candidates[-1]
 
 
@@ -284,7 +281,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--json", dest="json_out", default=None)
     parser.add_argument(
         "--config",
-        choices=("auto", "agentic-ja", "voice-live"),
+        choices=("auto", "agentic-local-tts", "voice-live"),
         default="auto",
         help="Analyzer mode. 'auto' infers from run-dir basename.",
     )
@@ -314,7 +311,7 @@ def main(argv: list[str]) -> int:
         f"p50={efa['p50']:.2f}s  p95={efa['p95']:.2f}s"
     )
 
-    if mode == "agentic-ja":
+    if mode == "agentic-local-tts":
         afc = agg["metrics"]["agent_first_call_s"]
         sts = agg["metrics"]["speak_tts_s"]
         print(
@@ -340,8 +337,8 @@ def main(argv: list[str]) -> int:
 
     _print_table(f"all turns (n={len(live)})", agg["metrics"])
 
-    # Per-tool mcp_tool:* summary across all live turns (agentic-ja only).
-    if mode == "agentic-ja":
+    # Per-tool mcp_tool:* summary across all live turns (agentic-local-tts only).
+    if mode == "agentic-local-tts":
         tool_buckets: dict[str, list[float]] = defaultdict(list)
         for m_id, m in metrics.items():
             if m["warmup"]:

@@ -1,4 +1,4 @@
-"""Tests for the agentic_ja bench analyzer (state-machine variant)."""
+"""Tests for the agentic_local_tts bench analyzer (state-machine variant)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from bench_agentic_ja import (  # noqa: E402
+from bench_agentic_local_tts import (  # noqa: E402
     _percentile,
     aggregate,
     build_turns,
@@ -149,7 +149,7 @@ def test_percentile_basic_unchanged() -> None:
     assert _percentile([], 0.5) != _percentile([], 0.5)  # NaN
 
 
-def test_e2e_first_audio_s_computed_for_agentic_ja(jsonl_path):
+def test_e2e_first_audio_s_computed_for_agentic_local_tts(jsonl_path):
     turns = build_turns(jsonl_path)
     metrics = compute_per_turn_metrics(turns)
     # Turn A: user_audio_end.t=0.0, first_audio_out.t=0.95
@@ -201,8 +201,8 @@ def test_voice_live_mode_omits_ja_only_metrics(
     target.mkdir()
     (target / "main.jsonl").write_text(voice_live_jsonl_path.read_text())
 
-    from bench_agentic_ja import main as analyzer_main
-    analyzer_main(["bench_agentic_ja", str(target)])
+    from bench_agentic_local_tts import main as analyzer_main
+    analyzer_main(["bench_agentic_local_tts", str(target)])
     out = capsys.readouterr().out
     assert "e2e_first_audio_s" in out
     assert "first_tool_call_s" in out
@@ -212,6 +212,6 @@ def test_voice_live_mode_omits_ja_only_metrics(
 
 
 def test_mode_auto_detection_by_dir_name(tmp_path: Path) -> None:
-    from bench_agentic_ja import detect_mode
-    assert detect_mode(tmp_path / "2026-05-16-bench-agentic-ja") == "agentic-ja"
+    from bench_agentic_local_tts import detect_mode
+    assert detect_mode(tmp_path / "2026-05-16-bench-agentic-local-tts") == "agentic-local-tts"
     assert detect_mode(tmp_path / "2026-05-16-bench-agentic-voice-live") == "voice-live"

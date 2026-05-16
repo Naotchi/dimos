@@ -12,7 +12,7 @@ After publishing each wav we emit a `user_audio_end` bench event so the
 analyzer can compute end-to-end latencies relative to that timestamp.
 
 Inter-turn gating uses AzureVoiceLiveAgent.agent_idle (Out[bool]); unlike the
-agentic-ja flow there is no `turn_done` event, and a single user utterance
+agentic-local-tts cascade flow there is no `turn_done` event, and a single user utterance
 can produce multiple Voice Live `response.done` events (e.g. when a tool call
 is involved). We therefore consider a turn complete only once agent_idle has
 stayed True continuously for --idle-settle-ms.

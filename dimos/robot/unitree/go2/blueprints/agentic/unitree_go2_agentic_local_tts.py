@@ -13,11 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Japanese variant of unitree-go2-agentic.
+"""Cascade variant of unitree-go2-agentic with **local TTS**.
 
-Uses the bundled pyopenjtalk Japanese TTS, ja-tuned Whisper STT, the Japanese
-system prompt, and an env-driven LLM model selector. Upstream files are not
-modified.
+Differences from sibling blueprints:
+
+- ``unitree-go2-agentic`` (original, English):
+    STT=local Whisper, LLM=cloud, **TTS=cloud**.
+- ``unitree-go2-agentic-local-tts`` (this one, Japanese):
+    STT=local ja-tuned Whisper, LLM=cloud (``DIMOS_LLM_MODEL``, default
+    ``gpt-4o``), **TTS=local pyopenjtalk**, ja system prompt.
+- ``unitree-go2-agentic-voice-live`` (Japanese):
+    Azure Voice Live realtime end-to-end (STT+LLM+TTS cloud).
+
+The defining axis vs the other two is **local TTS** — Japanese (via
+pyopenjtalk) is implied by the locality choice. Upstream files are not
+modified; all fork-specific wiring is in ``*_ja`` helpers.
 """
 
 import os
@@ -33,11 +43,11 @@ from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial_bounded import
 
 _LLM_MODEL = os.environ.get("DIMOS_LLM_MODEL", "gpt-4o")
 
-unitree_go2_agentic_ja = autoconnect(
+unitree_go2_agentic_local_tts = autoconnect(
     unitree_go2_spatial_bounded,
     McpServer.blueprint(),
     TimedMcpClient.blueprint(model=_LLM_MODEL, system_prompt=SYSTEM_PROMPT_JA),
     _common_agentic_ja,
 )
 
-__all__ = ["unitree_go2_agentic_ja"]
+__all__ = ["unitree_go2_agentic_local_tts"]

@@ -5,7 +5,7 @@ Idempotent: skips entries whose target wav already exists. Run after editing
 `text` fields in fixtures.yaml.
 
 Usage:
-    python scripts/gen_fixtures_agentic_ja.py
+    python scripts/gen_fixtures_agentic_local_tts.py
 """
 
 from __future__ import annotations
