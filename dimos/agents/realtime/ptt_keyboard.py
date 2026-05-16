@@ -97,12 +97,12 @@ class PttKeyboard(Module):
 
     @rpc
     def stop(self) -> None:
-        if self._state.active:
-            self.mic_gate.publish(False)
-            self._state.active = False
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(DEFAULT_THREAD_JOIN_TIMEOUT)
+        if self._state.active:
+            self.mic_gate.publish(False)
+            self._state.active = False
         super().stop()
 
     def _emit(self, value: bool) -> None:
@@ -111,7 +111,7 @@ class PttKeyboard(Module):
 
     def _pygame_loop(self) -> None:
         pygame.init()
-        pygame.key.set_repeat(0)
+        pygame.key.set_repeat()
         self._screen = pygame.display.set_mode(
             (_WINDOW_WIDTH, _WINDOW_HEIGHT), pygame.SWSURFACE
         )
