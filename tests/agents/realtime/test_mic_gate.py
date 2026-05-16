@@ -44,7 +44,7 @@ def test_on_mic_gate_false_clears_active():
 
 def test_session_updated_auto_set_when_gate_unwired():
     agent = _make_agent_minimal()
-    agent._mic_gate_connected = False
+    agent._ptt_mode = False
     agent.agent_idle = MagicMock()
 
     agent._maybe_activate_mic_on_session_ready()
@@ -55,7 +55,7 @@ def test_session_updated_auto_set_when_gate_unwired():
 
 def test_session_updated_skips_auto_set_when_gate_wired():
     agent = _make_agent_minimal()
-    agent._mic_gate_connected = True
+    agent._ptt_mode = True
     agent.agent_idle = MagicMock()
 
     agent._maybe_activate_mic_on_session_ready()

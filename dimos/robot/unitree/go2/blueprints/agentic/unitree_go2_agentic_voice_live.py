@@ -34,7 +34,7 @@ from dimos.robot.unitree.unitree_skill_container import UnitreeSkillContainer
 unitree_go2_agentic_voice_live = autoconnect(
     unitree_go2_spatial,
     McpServer.blueprint(),
-    AzureVoiceLiveAgent.blueprint(),
+    AzureVoiceLiveAgent.blueprint(ptt_mode=True),
     PttKeyboard.blueprint(),
     SpeakSkill.blueprint(),
     NavigationSkillContainer.blueprint(),

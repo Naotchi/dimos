@@ -243,7 +243,7 @@ class AzureVoiceLiveAgent(Module):
     mic_gate: In[bool]
     agent_idle: Out[bool]
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, ptt_mode: bool = False, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._tool_pool: ThreadPoolExecutor | None = None
         self._mcp: McpAdapter | None = None
@@ -254,7 +254,7 @@ class AzureVoiceLiveAgent(Module):
         self._conn: Any = None  # VoiceLiveConnection at runtime
         self._playback: _VoicePlayback | None = None
         self._mic_active = threading.Event()
-        self._mic_gate_connected = False
+        self._ptt_mode = ptt_mode
         self._response_active = False
         self._response_text_buf: list[str] = []
         self._first_audio_emitted = False
@@ -301,14 +301,10 @@ class AzureVoiceLiveAgent(Module):
         self._playback.start()
         self._human_input_sub = self.human_input.subscribe(self._on_human_text)
         self.register_disposable(Disposable(self._human_input_sub))
-        self._mic_gate_connected = self.mic_gate.connection is not None
-        if self._mic_gate_connected:
-            self._mic_gate_sub = Disposable(
-                self.mic_gate.subscribe(self._on_mic_gate)
-            )
-            self.register_disposable(self._mic_gate_sub)
-        else:
-            self._mic_gate_sub = None
+        self._mic_gate_sub = Disposable(
+            self.mic_gate.subscribe(self._on_mic_gate)
+        )
+        self.register_disposable(self._mic_gate_sub)
         self._tool_stream_cleanup = tool_stream.subscribe(
             self._on_tool_stream_message
         )
@@ -532,9 +528,9 @@ class AzureVoiceLiveAgent(Module):
             self._mic_active.clear()
 
     def _maybe_activate_mic_on_session_ready(self) -> None:
-        # In PTT mode (mic_gate wired), the gate input owns _mic_active —
+        # In PTT mode (ptt_mode=True), the mic_gate input owns _mic_active —
         # leave it cleared so audio only flows while the user holds SPACE.
-        if not self._mic_gate_connected:
+        if not self._ptt_mode:
             self._mic_active.set()
         self.agent_idle.publish(True)
 
