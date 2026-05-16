@@ -124,7 +124,7 @@ async def test_audio_present_then_silent_action_tool():
 
 async def _complete_pending_subresponse(agent):
     """Simulate Voice Live finishing the preface/tool_result response."""
-    # The agent task is awaiting _resp_done_event after issuing response.create.
+    # The agent task is awaiting active.done after issuing response.create.
     # Emit RESPONSE_CREATED + RESPONSE_DONE for that response.
     await _emit(
         agent,
@@ -273,7 +273,7 @@ async def test_speech_started_releases_pending_waiter():
         _FakeEvent(type=ServerEventType.RESPONSE_DONE),  # triggers preface
     )
     await asyncio.sleep(0)
-    # Now agent is awaiting _resp_done_event. Fire barge-in.
+    # Now agent is awaiting active.done. Fire barge-in.
     await _emit(
         agent,
         _FakeEvent(type=ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED),
