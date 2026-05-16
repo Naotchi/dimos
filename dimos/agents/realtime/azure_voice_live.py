@@ -602,12 +602,16 @@ class AzureVoiceLiveAgent(Module):
         """
         active = _ActiveResponse(trigger=req.trigger)
         self._pending_active = active
-        await self._conn.response.create(
-            response={
-                "modalities": list(req.modalities),
-                "instructions": req.instructions,
-            }
-        )
+        try:
+            await self._conn.response.create(
+                response={
+                    "modalities": list(req.modalities),
+                    "instructions": req.instructions,
+                }
+            )
+        except Exception:
+            self._pending_active = None
+            raise
         await active.done.wait()
         return active.snapshot()
 
@@ -679,7 +683,9 @@ class AzureVoiceLiveAgent(Module):
                 self._active.done.set()
                 self._active = None
             if self._pending_active is not None:
-                self._pending_active.pending_calls = []
+                # _pending_active has never been promoted to _active, so
+                # no streaming state has been written to it — just signal
+                # the waiter and clear the slot.
                 self._pending_active.done.set()
                 self._pending_active = None
             self.agent_idle.publish(False)
