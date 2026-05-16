@@ -623,8 +623,12 @@ class AzureVoiceLiveAgent(Module):
                 logger.info("DBG dispatching tool=%s", name)
                 await self._dispatch_and_wait(call_id, name, args)
                 logger.info("DBG dispatch returned tool=%s", name)
-        except Exception:
-            logger.exception("_on_response_done failed")
+        except Exception as exc:
+            import traceback
+            logger.error(
+                "_on_response_done failed: %s: %s\n%s",
+                type(exc).__name__, exc, traceback.format_exc(),
+            )
         finally:
             self.agent_idle.publish(True)
 
