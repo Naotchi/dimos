@@ -22,7 +22,7 @@ import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from reactivex.disposable import Disposable
@@ -81,6 +81,43 @@ class _ResponseSnapshot:
     had_audio: bool
     pending_calls: list[tuple[str, str, str]]  # (call_id, name, args_json)
     text: str
+
+
+@dataclass(frozen=True)
+class ResponseRequest:
+    """Parameters for an agent-initiated response.create call.
+
+    Used by _issue_response to bundle trigger label, instructions, and
+    modalities into one value object. Replaces the implicit
+    "_next_trigger = ...; await response.create(...)" protocol.
+    """
+    trigger: str  # "preface_forced" | "tool_result" | future labels
+    instructions: str
+    modalities: tuple[str, ...] = ("audio", "text")
+
+
+@dataclass
+class _ActiveResponse:
+    """Per-response accumulator + completion event.
+
+    Lifetime: constructed at RESPONSE_CREATED (or pre-built by
+    _issue_response and promoted at RESPONSE_CREATED), discarded at
+    RESPONSE_DONE / SPEECH_STARTED. Owns its own `done` event so there
+    is no nullable single-Event reuse across responses.
+    """
+    trigger: str  # "user" | "preface_forced" | "tool_result"
+    had_audio: bool = False
+    pending_calls: list[tuple[str, str, str]] = field(default_factory=list)
+    text_buf: list[str] = field(default_factory=list)
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def snapshot(self) -> _ResponseSnapshot:
+        return _ResponseSnapshot(
+            trigger=self.trigger,
+            had_audio=self.had_audio,
+            pending_calls=list(self.pending_calls),
+            text="".join(self.text_buf).strip(),
+        )
 
 
 class _VoicePlayback:
