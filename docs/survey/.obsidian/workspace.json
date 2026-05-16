@@ -83,12 +83,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "MCP Server.md",
+                "file": "Claude導入.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "MCP Server"
+              "title": "Claude導入"
             }
           },
           {
@@ -310,12 +310,12 @@
   },
   "active": "d57afea337366305",
   "lastOpenFiles": [
+    "unitree-go2-agentic.md",
     "TODO.md",
-    "Claude導入.md",
-    "MCP Server.md",
     "superpowers利用例.md",
     "MEMO.md",
-    "unitree-go2-agentic.md",
+    "MCP Server.md",
+    "Claude導入.md",
     "DimOS実装事例とエコシステム分析.md",
     "DimOS 技術スタック完全棚卸しレポート.md",
     "DimOS Interactive Viewer.md",
