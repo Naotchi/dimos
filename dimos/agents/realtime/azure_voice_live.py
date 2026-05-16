@@ -393,48 +393,6 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 logger.exception("Voice Live event handler error")
 
-    def _dispatch_function_call(
-        self, call_id: str, name: str, arguments: str
-    ) -> None:
-        if self._tool_pool is None or self._mcp is None:
-            return
-        self._tool_pool.submit(self._run_function_call, call_id, name, arguments)
-
-    def _run_function_call(
-        self, call_id: str, name: str, arguments: str
-    ) -> None:
-        assert self._mcp is not None
-        try:
-            args = json.loads(arguments) if arguments else {}
-        except Exception as exc:  # noqa: BLE001
-            output = f"Error: invalid arguments JSON: {exc}"
-            self._send_function_output(call_id, output)
-            return
-        try:
-            result = self._mcp.call_tool(name, args)
-            output = _extract_tool_text(result)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("MCP tool %s failed", name)
-            output = f"Error: {exc}"
-        self._send_function_output(call_id, output)
-
-    def _send_function_output(self, call_id: str, output: str) -> None:
-        if self._loop is None or self._conn is None:
-            logger.warning("send_function_output before WS ready; dropping")
-            return
-
-        async def _send() -> None:
-            await self._conn.conversation.item.create(
-                item={
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": output,
-                }
-            )
-            await self._conn.response.create()
-
-        asyncio.run_coroutine_threadsafe(_send(), self._loop)
-
     def _send_user_text(self, text: str, prompt_response: bool = True) -> None:
         if self._loop is None or self._conn is None:
             logger.warning("user text dropped: WS not ready (%r)", text)
@@ -562,6 +520,23 @@ class AzureVoiceLiveAgent(Module):
             self._conn.input_audio_buffer.append(audio=b64), self._loop
         )
 
+    def _snapshot_response_state(self) -> _ResponseSnapshot:
+        snap = _ResponseSnapshot(
+            trigger=self._resp_trigger,
+            had_audio=self._resp_had_audio,
+            pending_calls=list(self._resp_pending_calls),
+            text="".join(self._resp_text_buf).strip(),
+        )
+        self._resp_had_audio = False
+        self._resp_pending_calls = []
+        self._resp_text_buf = []
+        self._resp_trigger = "user"
+        return snap
+
+    async def _on_response_done(self, snap: _ResponseSnapshot) -> None:
+        # Filled in by Task 4.
+        self.agent_idle.publish(True)
+
     async def _handle_event(self, event: Any) -> None:
         et = event.type
         if et == ServerEventType.SESSION_UPDATED:
@@ -571,43 +546,60 @@ class AzureVoiceLiveAgent(Module):
         elif et == ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED:
             if self._playback is not None:
                 self._playback.skip_pending()
-            if self._response_active and self._conn is not None:
+            if self._conn is not None:
                 try:
                     await self._conn.response.cancel()
                 except Exception as exc:  # noqa: BLE001
                     if "no active response" not in str(exc).lower():
                         logger.warning("response.cancel failed: %s", exc)
+            # Release any pending serialization waiter so dispatch can unwind.
+            if self._resp_done_event is not None:
+                self._resp_done_event.set()
+            self._resp_pending_calls = []
             self.agent_idle.publish(False)
+        elif et == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED:
+            transcript = (getattr(event, "transcript", "") or "").strip()
+            if transcript:
+                logger.info("user: %s", transcript)
+                self.agent.publish(HumanMessage(content=transcript))
         elif et == ServerEventType.RESPONSE_CREATED:
-            self._response_active = True
-            self._response_text_buf = []
+            self._resp_trigger = self._next_trigger or "user"
+            self._next_trigger = None
+            self._resp_had_audio = False
+            self._resp_pending_calls = []
+            self._resp_text_buf = []
             self.agent_idle.publish(False)
         elif et == ServerEventType.RESPONSE_AUDIO_DELTA:
             if not self._first_audio_emitted:
                 log_bench_event("first_audio_out")
                 self._first_audio_emitted = True
+            self._resp_had_audio = True
             if self._playback is not None:
                 self._playback.enqueue(event.delta)
         elif et == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA:
-            self._response_text_buf.append(event.delta or "")
+            self._resp_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_TEXT_DELTA:
-            self._response_text_buf.append(event.delta or "")
+            self._resp_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE:
             if not self._first_tool_call_emitted:
                 log_bench_event("first_tool_call", tool=event.name)
                 self._first_tool_call_emitted = True
-            self._dispatch_function_call(
-                call_id=event.call_id,
-                name=event.name,
-                arguments=event.arguments,
+            self._resp_pending_calls.append(
+                (event.call_id, event.name, event.arguments)
             )
         elif et == ServerEventType.RESPONSE_DONE:
-            text = "".join(self._response_text_buf).strip()
-            if text:
-                self.agent.publish(AIMessage(content=text))
-            self._response_text_buf = []
-            self._response_active = False
-            self.agent_idle.publish(True)
+            snap = self._snapshot_response_state()
+            if snap.text:
+                logger.info("assistant: %s", snap.text)
+                self.agent.publish(AIMessage(content=snap.text))
+            # Release any serialization waiter (preface/tool_result responses).
+            if self._resp_done_event is not None:
+                self._resp_done_event.set()
+            if snap.trigger == "user":
+                asyncio.create_task(self._on_response_done(snap))
+            else:
+                # preface_forced / tool_result: finalize only, no further routing.
+                self.agent_idle.publish(True)
         elif et == ServerEventType.ERROR:
             logger.error("Voice Live error: %s", event.error.message)
         else:
