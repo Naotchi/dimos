@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""McpClient subclass with per-step LLM/tool timing + first_motion_tool event.
+"""McpClient subclass with per-step LLM/tool timing + first_tool_call event.
 
 Routes all bench events through dimos.agents.bench_ja.log_bench_event so the
 schema is identical across the *_ja.py files (turn_id, t, event_kind).
