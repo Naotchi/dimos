@@ -177,6 +177,7 @@ agents = [
     "sounddevice",
     "faster-whisper>=1.0.0",
     "websockets>=13",
+    "pyopenjtalk>=0.4.1",
 ]
 
 web = [

@@ -2073,6 +2073,7 @@ agents = [
     { name = "langchain-text-splitters" },
     { name = "ollama" },
     { name = "openai" },
+    { name = "pyopenjtalk" },
     { name = "sounddevice" },
     { name = "websockets" },
 ]
@@ -2139,6 +2140,7 @@ all = [
     { name = "pydantic-settings" },
     { name = "pygame" },
     { name = "pymavlink" },
+    { name = "pyopenjtalk" },
     { name = "pyrealsense2", marker = "sys_platform != 'darwin'" },
     { name = "python-multipart" },
     { name = "pyturbojpeg" },
@@ -2195,6 +2197,7 @@ base = [
     { name = "langchain-text-splitters" },
     { name = "ollama" },
     { name = "openai" },
+    { name = "pyopenjtalk" },
     { name = "rerun-sdk" },
     { name = "sounddevice" },
     { name = "soundfile" },
@@ -2317,6 +2320,7 @@ unitree = [
     { name = "langchain-text-splitters" },
     { name = "ollama" },
     { name = "openai" },
+    { name = "pyopenjtalk" },
     { name = "rerun-sdk" },
     { name = "sounddevice" },
     { name = "soundfile" },
@@ -2342,6 +2346,7 @@ unitree-dds = [
     { name = "langchain-text-splitters" },
     { name = "ollama" },
     { name = "openai" },
+    { name = "pyopenjtalk" },
     { name = "rerun-sdk" },
     { name = "sounddevice" },
     { name = "soundfile" },
@@ -2604,6 +2609,7 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'docker'", specifier = ">=2.11.0,<3" },
     { name = "pygame", marker = "extra == 'sim'", specifier = ">=2.6.1" },
     { name = "pymavlink", marker = "extra == 'drone'" },
+    { name = "pyopenjtalk", marker = "extra == 'agents'", specifier = ">=0.4.1" },
     { name = "pyrealsense2", marker = "sys_platform != 'darwin' and extra == 'manipulation'" },
     { name = "python-dotenv" },
     { name = "python-multipart", marker = "extra == 'misc'", specifier = ">=0.0.27" },
@@ -9143,6 +9149,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/6f/16/912b7225d56284859
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/e4/1ba6f44e491c4eece978685230dde56b14d51a0365bc1b774ddaa94d14cd/pyopengl-3.1.10-py3-none-any.whl", hash = "sha256:794a943daced39300879e4e47bd94525280685f42dbb5a998d336cfff151d74f", size = 3194996, upload-time = "2025-08-18T02:32:59.902Z" },
 ]
+
+[[package]]
+name = "pyopenjtalk"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/74/ccd31c696f047ba381f9b11a504bf1199756c3f30f3de64e3eeb83e10b4a/pyopenjtalk-0.4.1.tar.gz", hash = "sha256:d5ada46f7fc2b52c1c79c273eb9668ff6ad7ab276a8db9d8be119ef93440f0dc", size = 1397999, upload-time = "2025-04-08T06:27:46.528Z" }
 
 [[package]]
 name = "pyopenssl"
