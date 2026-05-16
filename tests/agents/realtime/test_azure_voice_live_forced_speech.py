@@ -177,3 +177,79 @@ async def test_preface_forced_before_action_tool_then_silent():
     assert "relative_move" in preface_call.kwargs["response"]["instructions"]
     agent._mcp.call_tool.assert_called_once_with("relative_move", {"forward": 1.0})
     assert agent._conn.conversation.item.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_report_after_observe():
+    agent = _make_agent()
+    agent._mcp.call_tool.return_value = {
+        "content": [{"type": "text", "text": "front: chair"}]
+    }
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_DELTA, delta=b"\x01"),
+        _FakeEvent(
+            type=ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE,
+            call_id="c3",
+            name="observe",
+            arguments="{}",
+        ),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await asyncio.sleep(0)
+    await _complete_pending_subresponse(agent)
+    await _drain_tasks()
+
+    assert agent._conn.response.create.await_count == 1
+    report_call = agent._conn.response.create.await_args_list[0]
+    assert "要約" in report_call.kwargs["response"]["instructions"]
+    assert agent._conn.conversation.item.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_silent_preface_response_does_not_re_force():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),  # trigger=user
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),     # no audio -> forces preface
+    )
+    await asyncio.sleep(0)
+    # Emit a SILENT preface_forced sub-response (no audio delta).
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),  # trigger=preface_forced
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await _drain_tasks()
+
+    # Only the original forced preface response.create -- no recursive re-force.
+    assert agent._conn.response.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_silent_tool_result_response_does_not_re_force():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_DELTA, delta=b"\x01"),
+        _FakeEvent(
+            type=ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE,
+            call_id="c4",
+            name="observe",
+            arguments="{}",
+        ),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await asyncio.sleep(0)
+    # SILENT tool_result sub-response.
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),  # trigger=tool_result
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await _drain_tasks()
+
+    assert agent._conn.response.create.await_count == 1  # only the report request
