@@ -202,6 +202,28 @@ dimos run unitree-go2
 
 > Full blueprint docs: [docs/usage/blueprints.md](docs/usage/blueprints.md)
 
+### Azure Voice Live バリアント
+
+リアルタイム音声会話（STT + LLM + TTS + 関数呼び出しが Azure Voice Live 1
+セッション）で起動するには:
+
+```bash
+export DIMOS_AZURE_VOICE_LIVE_ENDPOINT=wss://<your-resource>.cognitiveservices.azure.com/
+export DIMOS_AZURE_VOICE_LIVE_API_KEY=<key>
+export DIMOS_AZURE_VOICE_LIVE_MODEL=gpt-realtime         # 任意（既定: gpt-realtime）
+export DIMOS_AZURE_VOICE_LIVE_VOICE=ja-JP-NanamiNeural   # 任意（既定: ja-JP-NanamiNeural）
+
+uv run dimos run unitree-go2-agentic-voice-live
+```
+
+PC のローカルマイク / スピーカーで音声入出力します（Go2 オンボードオーディ
+オは未対応）。Web UI からのテキスト入力も並行して受け付けます。会話応答の
+TTS は Voice Live が担当しますが、`SpeakSkill` は SecurityModule の侵入者
+検知アラート用に残してあります。
+
+完全な環境変数リストは
+`docs/superpowers/specs/2026-05-14-voice-live-rewrite-design.md` を参照。
+
 # Agent CLI and MCP
 
 The `dimos` CLI manages the full lifecycle — run blueprints, inspect state, interact with agents, and call skills via MCP.

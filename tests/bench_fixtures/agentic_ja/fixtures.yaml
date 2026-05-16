@@ -1,0 +1,42 @@
+version: 1
+fixtures:
+  - id: fx_01
+    wav: fx_01.wav
+    text: "おはよう"
+    notes: "speak only — short greeting"
+  - id: fx_02
+    wav: fx_02.wav
+    text: "自己紹介してください"
+    notes: "speak only — intro"
+  - id: fx_03
+    wav: fx_03.wav
+    text: "ありがとう"
+    notes: "speak only — thanks"
+  - id: fx_04
+    wav: fx_04.wav
+    text: "立ち上がって挨拶してください"
+    notes: "sport + speak"
+  - id: fx_05
+    wav: fx_05.wav
+    text: "お座りしてよろしくって言って"
+    notes: "sport + speak"
+  - id: fx_06
+    wav: fx_06.wav
+    text: "踊って、その後感想を言って"
+    notes: "sport + speak (sequential likely)"
+  - id: fx_07
+    wav: fx_07.wav
+    text: "今何時か教えて"
+    notes: "current_time + speak"
+  - id: fx_08
+    wav: fx_08.wav
+    text: "1メートル前に進んで、着いたら教えて"
+    notes: "relative_move + speak (sequential)"
+  - id: fx_09
+    wav: fx_09.wav
+    text: "伏せて"
+    notes: "sport only — no speak"
+  - id: fx_10
+    wav: fx_10.wav
+    text: "今日の予定を3つ提案して"
+    notes: "speak only — longer output"

@@ -2,6 +2,12 @@
 **/*.ignore
 **/*.ignore.*
 
+# Obsidian vault metadata (docs/ is a personal vault)
+.obsidian/
+
+# Personal notes kept out of the fork
+docs/private/
+
 # Default output of `dimos apriltag`
 /apriltags.pdf
 
@@ -58,9 +64,11 @@ yolo11n.pt
 .envrc
 .claude
 **/CLAUDE.md
+!/CLAUDE.md
 .direnv/
 
 /logs
+/scripts/logs
 
 *.so
 

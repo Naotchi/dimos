@@ -91,6 +91,10 @@ dependencies = [
     "rpyc>=6.0.0",
     "bleak>=3.0.2",
     "cryptography>=46.0.5",
+    "azure-ai-voicelive>=1.1.0",
+    "azure-identity>=1.25.3",
+    "pyaudio>=0.2.14",
+    "aiohttp>=3.13.5",
 ]
 
 
@@ -172,6 +176,8 @@ agents = [
     "openai",
     "sounddevice",
     "faster-whisper>=1.0.0",
+    "websockets>=13",
+    "pyopenjtalk>=0.4.1",
 ]
 
 web = [
