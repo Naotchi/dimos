@@ -71,6 +71,15 @@ class _PlaybackPacket:
     data: bytes | None  # None = end-of-stream sentinel
 
 
+@dataclass
+class _ResponseSnapshot:
+    """Per-response state captured at RESPONSE_DONE before resetting."""
+    trigger: str  # "user" | "tool_result" | "preface_forced"
+    had_audio: bool
+    pending_calls: list[tuple[str, str, str]]  # (call_id, name, args_json)
+    text: str
+
+
 class _VoicePlayback:
     """Callback-driven sounddevice output with a cancellable queue.
 
@@ -269,8 +278,12 @@ class AzureVoiceLiveAgent(Module):
         self._conn: Any = None  # VoiceLiveConnection at runtime
         self._playback: _VoicePlayback | None = None
         self._mic_active = threading.Event()
-        self._response_active = False
-        self._response_text_buf: list[str] = []
+        self._resp_had_audio: bool = False
+        self._resp_pending_calls: list[tuple[str, str, str]] = []
+        self._resp_text_buf: list[str] = []
+        self._resp_trigger: str = "user"
+        self._next_trigger: str | None = None
+        self._resp_done_event: asyncio.Event | None = None
         self._first_audio_emitted = False
         self._first_tool_call_emitted = False
         self._mic: SounddeviceAudioSource | None = None
