@@ -175,6 +175,7 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
             "audio_seconds": ue.get("audio_seconds"),
             "agent_first_call_s": _delta(ftc, t0),
             "speak_tts_s": speak_tts_s,
+            "e2e_first_audio_s": _delta(fao, t0),
             "stt_s": _parse_duration(stt.get("duration_s")) if stt else None,
             "llm_total_s": sum(llm_durations) if llm_durations else None,
             "tools_total_s": sum(tools_durations) if tools_durations else None,
@@ -211,6 +212,7 @@ def _summarize(values: list[float | None]) -> dict[str, float]:
 
 
 _METRIC_KEYS = (
+    "e2e_first_audio_s",
     "agent_first_call_s",
     "speak_tts_s",
     "stt_s",
@@ -275,8 +277,13 @@ def main(argv: list[str]) -> int:
 
     # Headline indicators.
     print("\n== headline ==")
+    efa = agg["metrics"]["e2e_first_audio_s"]
     afc = agg["metrics"]["agent_first_call_s"]
     sts = agg["metrics"]["speak_tts_s"]
+    print(
+        f"e2e_first_audio_s    n={efa['n']}/{len(live)}  "
+        f"p50={efa['p50']:.2f}s  p95={efa['p95']:.2f}s"
+    )
     print(
         f"agent_first_call_s   n={afc['n']}/{len(live)}  "
         f"p50={afc['p50']:.2f}s  p95={afc['p95']:.2f}s"

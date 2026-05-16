@@ -147,3 +147,12 @@ def test_aggregate_single_pool_drops_warmup(jsonl_path: Path) -> None:
 def test_percentile_basic_unchanged() -> None:
     assert _percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) == 3.0
     assert _percentile([], 0.5) != _percentile([], 0.5)  # NaN
+
+
+def test_e2e_first_audio_s_computed_for_agentic_ja(jsonl_path):
+    turns = build_turns(jsonl_path)
+    metrics = compute_per_turn_metrics(turns)
+    # Turn A: user_audio_end.t=0.0, first_audio_out.t=0.95
+    assert metrics["A"]["e2e_first_audio_s"] == pytest.approx(0.95)
+    # Turn B: no first_audio_out (motion-only) -> None
+    assert metrics["B"]["e2e_first_audio_s"] is None
