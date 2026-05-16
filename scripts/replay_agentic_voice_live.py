@@ -145,28 +145,38 @@ def post_wav(wav_path: Path) -> bool:
 
 
 class IdleSettleWaiter:
-    """Sets an internal Event once agent_idle stays True for settle_ms
-    continuously. Resets the timer on any False re-entry."""
+    """Sets an internal Event once agent_idle has transitioned False then
+    stayed True for settle_ms continuously. The False-first requirement
+    prevents settling on a stale True state when the wav has been posted
+    but Voice Live VAD hasn't yet flipped the agent into a response."""
 
     def __init__(self, agent_idle_stream: Any, settle_ms: float) -> None:
         self._evt = threading.Event()
         self._settle_s = settle_ms / 1000.0
         self._timer: threading.Timer | None = None
+        self._seen_false = False
         self._sub = agent_idle_stream.subscribe(self._on_idle)
 
     def _on_idle(self, is_idle: bool) -> None:
+        if not is_idle:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self._seen_false = True
+            return
+        if not self._seen_false:
+            return
         if self._timer is not None:
-            self._timer.cancel()
-            self._timer = None
-        if is_idle:
-            self._timer = threading.Timer(self._settle_s, self._evt.set)
-            self._timer.daemon = True
-            self._timer.start()
+            return
+        self._timer = threading.Timer(self._settle_s, self._evt.set)
+        self._timer.daemon = True
+        self._timer.start()
 
     def clear(self) -> None:
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
+        self._seen_false = False
         self._evt.clear()
 
     def wait(self, timeout: float) -> bool:

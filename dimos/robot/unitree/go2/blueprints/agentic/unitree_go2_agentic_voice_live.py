@@ -18,7 +18,7 @@ from dimos.agents.realtime import AzureVoiceLiveAgent
 from dimos.agents.skills.navigation import NavigationSkillContainer
 from dimos.agents.skills.person_follow import PersonFollowSkillContainer
 from dimos.agents.skills.speak_skill import SpeakSkill
-from dimos.agents.web_human_input_ja import JapaneseWebInput
+from dimos.agents.web_input_audio_only import WebInputAudioOnly
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial import unitree_go2_spatial
 from dimos.robot.unitree.go2.connection import GO2Connection
@@ -31,7 +31,7 @@ unitree_go2_agentic_voice_live = autoconnect(
     unitree_go2_spatial,
     McpServer.blueprint(),
     AzureVoiceLiveAgent.blueprint(),
-    JapaneseWebInput.blueprint(),
+    WebInputAudioOnly.blueprint(),
     SpeakSkill.blueprint(),
     NavigationSkillContainer.blueprint(),
     PersonFollowSkillContainer.blueprint(camera_info=GO2Connection.camera_info_static),
