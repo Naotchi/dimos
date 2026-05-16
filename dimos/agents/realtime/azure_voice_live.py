@@ -195,6 +195,14 @@ def _extract_tool_text(result: dict[str, Any]) -> str:
     return text
 
 
+def _parse_tool_set(env_name: str, default: set[str]) -> set[str]:
+    """Parse a comma-separated env var into a set, returning ``default`` if unset."""
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
 class AzureVoiceLiveConfig(ModuleConfig):
     endpoint: str = Field(
         default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}ENDPOINT", "")
@@ -231,6 +239,14 @@ class AzureVoiceLiveConfig(ModuleConfig):
         )
     )
     sample_rate: int = 24000
+    # Tool names whose execution should be followed by a spoken result report.
+    # Anything not in this set runs silently after a preface utterance.
+    report_after_tools: set[str] = Field(
+        default_factory=lambda: _parse_tool_set(
+            f"{_ENV_PREFIX}REPORT_AFTER_TOOLS",
+            {"observe", "current_time"},
+        )
+    )
 
 
 class AzureVoiceLiveAgent(Module):
