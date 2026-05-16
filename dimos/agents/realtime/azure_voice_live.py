@@ -535,13 +535,16 @@ class AzureVoiceLiveAgent(Module):
         self.agent_idle.publish(True)
 
     def _on_mic_audio(self, event: Any) -> None:
-        if not self._mic_active.is_set():
-            return
         if self._loop is None or self._conn is None:
             return
         target_sr = self.config.sample_rate
         int16_event = event.to_int16()
         samples = int16_event.data
+        # Keep the stream continuous so the server VAD sees speech→silence
+        # transitions: substitute zeros when the gate is closed instead of
+        # halting publication.
+        if not self._mic_active.is_set():
+            samples = np.zeros_like(samples)
         if int16_event.sample_rate != target_sr:
             resampled = resample_poly(
                 samples, up=target_sr, down=int16_event.sample_rate
