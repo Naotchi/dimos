@@ -96,3 +96,30 @@ def test_build_turns_state_machine_groups_by_open_turn(jsonl_path: Path) -> None
     assert b["first_tool_call"]["tool"] == "execute_sport_command"
     assert "first_audio_out" not in b
     assert b["speak_invokes"] == []
+
+
+def test_compute_per_turn_metrics_new_indicators(jsonl_path: Path) -> None:
+    turns = build_turns(jsonl_path)
+    metrics = compute_per_turn_metrics(turns)
+
+    # Turn A: speak in round 0
+    a = metrics["A"]
+    assert a["fixture_id"] == "fx_01"
+    assert a["warmup"] is False
+    # first_tool_call.t = 0.7, user_audio_end.t = 0.0
+    assert a["agent_first_call_s"] == pytest.approx(0.7)
+    # first_audio_out.t = 0.95, first speak_invoke.t = 0.75
+    assert a["speak_tts_s"] == pytest.approx(0.20)
+    assert a["stt_s"] == pytest.approx(0.4)
+    assert a["llm_total_s"] == pytest.approx(0.5)
+    assert a["tools_total_s"] == pytest.approx(0.1)
+    assert a["turn_total_s"] == pytest.approx(1.0)
+    # Old indicators must not exist.
+    assert "e2e_response_s" not in a
+    assert "e2e_motion_s" not in a
+    assert "category" not in a
+
+    # Turn B: motion-only, no speak
+    b = metrics["B"]
+    assert b["agent_first_call_s"] == pytest.approx(0.6)
+    assert b["speak_tts_s"] is None  # excluded because no speak

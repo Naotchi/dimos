@@ -125,27 +125,42 @@ def build_turns(jsonl_path: Path) -> dict[str, dict[str, Any]]:
 
 
 def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Convert grouped events into per-turn numeric metrics."""
+    """Convert grouped events into per-turn numeric metrics.
+
+    Two headline indicators are computed:
+
+    - ``agent_first_call_s``: ``first_tool_call.t - user_audio_end.t``.
+      Measures STT + LLM latency. Defined for every turn that has a
+      ``first_tool_call`` event.
+    - ``speak_tts_s``: ``first_audio_out.t - first speak_invoke.t``.
+      Measures TTS synth + first-chunk latency. Defined only for turns
+      where ``speak`` was invoked.
+
+    Splitting these two intervals avoids the contamination that ``e2e_response_s``
+    suffered when motion preceded speak in a later LLM round.
+    """
     metrics: dict[str, dict[str, Any]] = {}
     for turn_id, data in turns.items():
         ue = data.get("user_audio_end")
         if not ue:
             continue
-        # Events come from multiple processes with independent perf_counter
-        # epochs, so we use wall-clock timestamps (cached as _t0_wall /
-        # _ts_wall during build_turns) for cross-event subtractions.
-        t0 = ue["_t0_wall"]
+        t0 = ue.get("t")
 
+        ftc = data.get("first_tool_call")
         fao = data.get("first_audio_out")
-        fmt = data.get("first_motion_tool")
         stt = data.get("stt_done")
         td = data.get("turn_done")
+        speak_invokes = data.get("speak_invokes", [])
 
-        def _delta(row: dict[str, Any] | None) -> float | None:
-            if row is None:
+        def _delta(row: dict[str, Any] | None, t_base: float | None) -> float | None:
+            if row is None or t_base is None:
                 return None
-            ts = row.get("_ts_wall")
-            return (ts - t0) if ts is not None else None
+            t = row.get("t")
+            return (t - t_base) if t is not None else None
+
+        speak_tts_s: float | None = None
+        if speak_invokes and fao is not None:
+            speak_tts_s = _delta(fao, speak_invokes[0].get("t"))
 
         llm_durations = [
             _parse_duration(s.get("duration_s")) or 0.0 for s in data.get("llm_steps", [])
@@ -155,12 +170,11 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
         ]
         metrics[turn_id] = {
             "fixture_id": ue.get("fixture_id"),
-            "category": ue.get("category"),
             "run_idx": ue.get("run_idx"),
             "warmup": bool(ue.get("warmup")),
             "audio_seconds": ue.get("audio_seconds"),
-            "e2e_response_s": _delta(fao),
-            "e2e_motion_s": _delta(fmt),
+            "agent_first_call_s": _delta(ftc, t0),
+            "speak_tts_s": speak_tts_s,
             "stt_s": _parse_duration(stt.get("duration_s")) if stt else None,
             "llm_total_s": sum(llm_durations) if llm_durations else None,
             "tools_total_s": sum(tools_durations) if tools_durations else None,
@@ -222,8 +236,8 @@ def _summarize(values: list[float | None]) -> dict[str, float]:
 
 
 _METRIC_KEYS = (
-    "e2e_response_s",
-    "e2e_motion_s",
+    "agent_first_call_s",
+    "speak_tts_s",
     "stt_s",
     "llm_total_s",
     "tools_total_s",
