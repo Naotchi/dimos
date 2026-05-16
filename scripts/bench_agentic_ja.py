@@ -8,13 +8,13 @@ Without a run-dir argument, picks the latest logs/*-bench-agentic-ja/, then
 falls back to logs/*-unitree-go2-agentic-ja/ for backward compatibility.
 
 Reads main.jsonl and prints per-turn end-to-end latencies and stage breakdown:
-  - e2e_response_s  (user_audio_end -> first_audio_out)
-  - e2e_motion_s    (user_audio_end -> first_motion_tool)
+  - agent_first_call_s  (user_audio_end -> first_tool_call)
+  - speak_tts_s         (first speak_invoke -> first_audio_out)
   - stt_s / llm_total_s / tools_total_s / turn_total_s
   - mcp_tool:*      (per-tool durations from upstream "MCP tool done" events,
                      bucketed into turns by timestamp range)
 
-Aggregates overall and per category (speak_only / motion_only / both).
+Aggregates over all non-warmup turns in a single pool.
 """
 
 from __future__ import annotations
@@ -186,31 +186,6 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
     return metrics
 
 
-def _is_concurrent_speak_motion(metric: dict[str, Any]) -> bool:
-    """Return True iff this turn has both speak and motion tool calls,
-    and the first speak invocation started before the last motion completion
-    (i.e. speak and motion overlap or speak comes first — system latency is
-    not inflated by waiting for motion to finish).
-
-    Uses wall-clock 't' (completion) and 'duration' from each mcp_tools entry;
-    invocation t = t - duration.
-    """
-    speak_invokes = []
-    motion_completes = []
-    for e in metric.get("mcp_tools", []):
-        t_done = e.get("t")
-        dur = e.get("duration")
-        if t_done is None:
-            continue
-        invoke_t = t_done - (dur or 0.0)
-        if e.get("tool") == "speak":
-            speak_invokes.append(invoke_t)
-        else:
-            motion_completes.append(t_done)
-    if not speak_invokes or not motion_completes:
-        return False
-    return min(speak_invokes) <= max(motion_completes)
-
 
 def _summarize(values: list[float | None]) -> dict[str, float]:
     """n / mean / p50 / p95 / max / min over a list, ignoring None and NaN."""
@@ -244,53 +219,17 @@ _METRIC_KEYS = (
     "turn_total_s",
 )
 
-# Per-category visible metrics. e2e_motion_s is NaN by design in speak_only.
-_CATEGORY_METRICS: dict[str, tuple[str, ...]] = {
-    "speak_only": (
-        "e2e_response_s",
-        "stt_s",
-        "llm_total_s",
-        "tools_total_s",
-        "turn_total_s",
-    ),
-    "concurrent": _METRIC_KEYS,
-    # legacy categories (older runs)
-    "motion_only": _METRIC_KEYS,
-    "both": _METRIC_KEYS,
-}
-
-
 def aggregate(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate non-warmup turns.
+    """Aggregate non-warmup turns into a single pool.
 
-    Returns:
-      by_category: per-category metrics, filtered to keys appropriate for that
-        category (see _CATEGORY_METRICS).
-      concurrent_parallel: metrics for the concurrent category restricted to
-        turns where speak and motion actually overlapped (system-perf view).
+    Returns the count of live turns and a per-metric summary
+    (n / mean / p50 / p95 / max / min) for every key in _METRIC_KEYS.
     """
     live = [m for m in metrics.values() if not m["warmup"]]
-
-    by_cat: dict[str, dict[str, Any]] = {}
-    for cat in sorted({m.get("category") for m in live if m.get("category")}):
-        cat_metrics = [m for m in live if m.get("category") == cat]
-        keys = _CATEGORY_METRICS.get(cat, _METRIC_KEYS)
-        by_cat[cat] = {
-            "n_turns": len(cat_metrics),
-            "metrics": {k: _summarize([m.get(k) for m in cat_metrics]) for k in keys},
-        }
-
-    concurrent_cat = [m for m in live if m.get("category") in ("concurrent", "both")]
-    parallel = [m for m in concurrent_cat if _is_concurrent_speak_motion(m)]
-    concurrent_parallel = {
-        "n_parallel": len(parallel),
-        "n_total": len(concurrent_cat),
-        "metrics": {k: _summarize([m.get(k) for m in parallel]) for k in _METRIC_KEYS}
-        if parallel
-        else None,
+    return {
+        "n_turns": len(live),
+        "metrics": {k: _summarize([m.get(k) for m in live]) for k in _METRIC_KEYS},
     }
-
-    return {"by_category": by_cat, "concurrent_parallel": concurrent_parallel}
 
 
 def _pick_run(arg: str | None) -> Path:
@@ -334,47 +273,22 @@ def main(argv: list[str]) -> int:
     print(f"run: {run_dir}")
     print(f"turns analyzed (non-warmup): {len(live)} / {len(metrics)} total")
 
-    # Headline SLO numbers: speak path + parallel concurrent path.
-    speak_cat = agg["by_category"].get("speak_only")
-    cp = agg["concurrent_parallel"]
-    print("\n== headline (system SLO) ==")
-    if speak_cat:
-        s = speak_cat["metrics"].get("e2e_response_s")
-        if s and s["n"]:
-            print(
-                f"speak_only.e2e_response_s   n={s['n']}  "
-                f"p50={s['p50']:.2f}s  p95={s['p95']:.2f}s"
-            )
-    if cp["metrics"] is not None:
-        r = cp["metrics"]["e2e_response_s"]
-        m = cp["metrics"]["e2e_motion_s"]
-        rate_pct = 100.0 * cp["n_parallel"] / max(cp["n_total"], 1)
-        print(
-            f"concurrent.e2e_response_s   n={r['n']}/{cp['n_total']} "
-            f"({rate_pct:.0f}% parallel)  p50={r['p50']:.2f}s  p95={r['p95']:.2f}s"
-        )
-        print(
-            f"concurrent.e2e_motion_s     n={m['n']}/{cp['n_total']} "
-            f"({rate_pct:.0f}% parallel)  p50={m['p50']:.2f}s  p95={m['p95']:.2f}s"
-        )
-    elif cp["n_total"]:
-        print(
-            f"concurrent: 0/{cp['n_total']} turns achieved parallel speak+motion"
-        )
+    # Headline indicators.
+    print("\n== headline ==")
+    afc = agg["metrics"]["agent_first_call_s"]
+    sts = agg["metrics"]["speak_tts_s"]
+    print(
+        f"agent_first_call_s   n={afc['n']}/{len(live)}  "
+        f"p50={afc['p50']:.2f}s  p95={afc['p95']:.2f}s"
+    )
+    n_no_speak = len(live) - sts["n"]
+    no_speak_note = f"  ({n_no_speak} turn(s) had no speak)" if n_no_speak else ""
+    print(
+        f"speak_tts_s          n={sts['n']}/{len(live)}  "
+        f"p50={sts['p50']:.2f}s  p95={sts['p95']:.2f}s{no_speak_note}"
+    )
 
-    # Per-category detail tables.
-    for cat, data in agg["by_category"].items():
-        _print_table(
-            f"category: {cat} (n={data['n_turns']})",
-            data["metrics"],
-        )
-
-    # System-perf view: concurrent-category turns where speak+motion overlapped.
-    if cp["metrics"] is not None:
-        _print_table(
-            f"concurrent (parallel turns only, n={cp['n_parallel']}/{cp['n_total']})",
-            cp["metrics"],
-        )
+    _print_table(f"all turns (n={len(live)})", agg["metrics"])
 
     # Per-tool mcp_tool:* summary across all live turns.
     tool_buckets: dict[str, list[float]] = defaultdict(list)

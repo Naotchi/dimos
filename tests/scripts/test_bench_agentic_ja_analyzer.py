@@ -123,3 +123,27 @@ def test_compute_per_turn_metrics_new_indicators(jsonl_path: Path) -> None:
     b = metrics["B"]
     assert b["agent_first_call_s"] == pytest.approx(0.6)
     assert b["speak_tts_s"] is None  # excluded because no speak
+
+
+def test_aggregate_single_pool_drops_warmup(jsonl_path: Path) -> None:
+    turns = build_turns(jsonl_path)
+    metrics = compute_per_turn_metrics(turns)
+    agg = aggregate(metrics)
+
+    # Single-pool aggregate: two live turns (A and B), warmup C dropped.
+    assert agg["n_turns"] == 2
+    assert agg["metrics"]["agent_first_call_s"]["n"] == 2
+    assert agg["metrics"]["agent_first_call_s"]["min"] == pytest.approx(0.6)
+    assert agg["metrics"]["agent_first_call_s"]["max"] == pytest.approx(0.7)
+    # speak_tts_s: only turn A contributed.
+    assert agg["metrics"]["speak_tts_s"]["n"] == 1
+    assert agg["metrics"]["speak_tts_s"]["p50"] == pytest.approx(0.20)
+
+    # No category split, no concurrent_parallel block.
+    assert "by_category" not in agg
+    assert "concurrent_parallel" not in agg
+
+
+def test_percentile_basic_unchanged() -> None:
+    assert _percentile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) == 3.0
+    assert _percentile([], 0.5) != _percentile([], 0.5)  # NaN
