@@ -253,3 +253,32 @@ async def test_silent_tool_result_response_does_not_re_force():
     await _drain_tasks()
 
     assert agent._conn.response.create.await_count == 1  # only the report request
+
+
+@pytest.mark.asyncio
+async def test_speech_started_releases_pending_waiter():
+    agent = _make_agent()
+    # Provide a playback stub so SPEECH_STARTED doesn't trip on None.
+    agent._playback = MagicMock()
+
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(
+            type=ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE,
+            call_id="c5",
+            name="relative_move",
+            arguments="{}",
+        ),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),  # triggers preface
+    )
+    await asyncio.sleep(0)
+    # Now agent is awaiting _resp_done_event. Fire barge-in.
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.INPUT_AUDIO_BUFFER_SPEECH_STARTED),
+    )
+    await _drain_tasks()  # must not raise "tasks did not settle"
+
+    agent._playback.skip_pending.assert_called_once()
+    agent._conn.response.cancel.assert_awaited_once()
