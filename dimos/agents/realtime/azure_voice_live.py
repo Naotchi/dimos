@@ -288,7 +288,7 @@ class AzureVoiceLiveAgent(Module):
             on_next=self._on_mic_audio
         )
         self._web_audio_sub = Disposable(
-            self.web_audio_in.subscribe(on_next=self._on_mic_audio)
+            self.web_audio_in.subscribe(self._on_mic_audio)
         )
         self.register_disposable(self._web_audio_sub)
         self._playback = _VoicePlayback(

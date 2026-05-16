@@ -152,7 +152,7 @@ class IdleSettleWaiter:
         self._evt = threading.Event()
         self._settle_s = settle_ms / 1000.0
         self._timer: threading.Timer | None = None
-        self._sub = agent_idle_stream.subscribe(on_next=self._on_idle)
+        self._sub = agent_idle_stream.subscribe(self._on_idle)
 
     def _on_idle(self, is_idle: bool) -> None:
         if self._timer is not None:
