@@ -533,9 +533,82 @@ class AzureVoiceLiveAgent(Module):
         self._resp_trigger = "user"
         return snap
 
+    def _invoke_mcp(self, name: str, arguments_json: str) -> str:
+        assert self._mcp is not None
+        try:
+            args = json.loads(arguments_json) if arguments_json else {}
+        except Exception as exc:  # noqa: BLE001
+            return f"Error: invalid arguments JSON: {exc}"
+        try:
+            result = self._mcp.call_tool(name, args)
+            return _extract_tool_text(result)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("MCP tool %s failed", name)
+            return f"Error: {exc}"
+
+    async def _force_preface(
+        self, pending_calls: list[tuple[str, str, str]]
+    ) -> None:
+        if pending_calls:
+            names = ", ".join(name for _, name, _ in pending_calls)
+            instructions = (
+                f"これから {names} を実行することを、"
+                f"日本語で1〜2語の短い音声で伝えてください。ツールは呼ばない。"
+            )
+        else:
+            instructions = "ユーザに日本語で短く一言返事をしてください。"
+
+        self._next_trigger = "preface_forced"
+        self._resp_done_event = asyncio.Event()
+        await self._conn.response.create(
+            response={
+                "modalities": ["audio", "text"],
+                "instructions": instructions,
+            }
+        )
+        await self._resp_done_event.wait()
+        self._resp_done_event = None
+
+    async def _dispatch_and_wait(
+        self, call_id: str, name: str, arguments_json: str
+    ) -> None:
+        assert self._loop is not None and self._tool_pool is not None
+        output = await self._loop.run_in_executor(
+            self._tool_pool, self._invoke_mcp, name, arguments_json
+        )
+        await self._conn.conversation.item.create(
+            item={
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output,
+            }
+        )
+        if name in self.config.report_after_tools:
+            self._next_trigger = "tool_result"
+            self._resp_done_event = asyncio.Event()
+            await self._conn.response.create(
+                response={
+                    "modalities": ["audio", "text"],
+                    "instructions": (
+                        "直前のツール結果を日本語で1文に要約して"
+                        "音声で報告してください。"
+                    ),
+                }
+            )
+            await self._resp_done_event.wait()
+            self._resp_done_event = None
+        # Silent path: no response.create — session waits for next user input.
+
     async def _on_response_done(self, snap: _ResponseSnapshot) -> None:
-        # Filled in by Task 4.
-        self.agent_idle.publish(True)
+        try:
+            if not snap.had_audio:
+                await self._force_preface(snap.pending_calls)
+            for call_id, name, args in snap.pending_calls:
+                await self._dispatch_and_wait(call_id, name, args)
+        except Exception:
+            logger.exception("_on_response_done failed")
+        finally:
+            self.agent_idle.publish(True)
 
     async def _handle_event(self, event: Any) -> None:
         et = event.type
