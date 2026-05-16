@@ -49,6 +49,7 @@ import sounddevice as sd  # type: ignore[import-untyped]
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import Field
 
+from dimos.agents.bench_ja import log_bench_event
 from dimos.agents.mcp import tool_stream
 from dimos.agents.mcp.mcp_adapter import McpAdapter
 from dimos.agents.realtime.prompts.japanese import JAPANESE_SYSTEM_PROMPT
@@ -251,6 +252,8 @@ class AzureVoiceLiveAgent(Module):
         self._mic_active = threading.Event()
         self._response_active = False
         self._response_text_buf: list[str] = []
+        self._first_audio_emitted = False
+        self._first_tool_call_emitted = False
         self._mic: SounddeviceAudioSource | None = None
         self._mic_subscription: Any = None
         self._human_input_sub: Any = None
@@ -534,6 +537,9 @@ class AzureVoiceLiveAgent(Module):
             self._response_text_buf = []
             self.agent_idle.publish(False)
         elif et == ServerEventType.RESPONSE_AUDIO_DELTA:
+            if not self._first_audio_emitted:
+                log_bench_event("first_audio_out")
+                self._first_audio_emitted = True
             if self._playback is not None:
                 self._playback.enqueue(event.delta)
         elif et == ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA:
@@ -541,6 +547,9 @@ class AzureVoiceLiveAgent(Module):
         elif et == ServerEventType.RESPONSE_TEXT_DELTA:
             self._response_text_buf.append(event.delta or "")
         elif et == ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE:
+            if not self._first_tool_call_emitted:
+                log_bench_event("first_tool_call", tool=event.name)
+                self._first_tool_call_emitted = True
             self._dispatch_function_call(
                 call_id=event.call_id,
                 name=event.name,
@@ -573,6 +582,13 @@ class AzureVoiceLiveAgent(Module):
             [t["name"] for t in mcp_tools],
         )
         self._start_ws_thread()
+
+    @rpc
+    def reset_bench_turn(self) -> None:
+        """Clear per-turn bench flags. Called by the bench replay driver
+        immediately after issuing a new turn_id, before posting wav audio."""
+        self._first_audio_emitted = False
+        self._first_tool_call_emitted = False
 
     @rpc
     def stop(self) -> None:
