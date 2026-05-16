@@ -35,14 +35,16 @@ import reactivex.operators as ops
 from dimos.agents.bench_ja import log_bench_event
 from dimos.agents.web_human_input import WebInput
 from dimos.core.core import rpc
+from dimos.core.stream import Out
 from dimos.core.transport import pLCMTransport
+from dimos.stream.audio.base import AudioEvent
 from dimos.stream.audio.node_normalizer import AudioNormalizer
 from dimos.stream.audio.stt.node_whisper import WhisperNode
 from dimos.utils.logging_config import setup_logger
 from dimos.web.robot_web_interface import RobotWebInterface
 
 if TYPE_CHECKING:
-    from dimos.stream.audio.base import AudioEvent
+    pass
 
 logger = setup_logger()
 
@@ -93,6 +95,8 @@ class JapaneseWebInput(WebInput):
     _human_transport: pLCMTransport
     _thread: Thread
 
+    audio_out: Out[AudioEvent]
+
     @rpc
     def start(self) -> None:
         from dimos.core.module import Module
@@ -101,6 +105,11 @@ class JapaneseWebInput(WebInput):
 
         self._human_transport = pLCMTransport("/human_input")
         self._audio_subject = rx.subject.Subject()
+
+        audio_out_sub = self._audio_subject.subscribe(
+            on_next=self.audio_out.publish
+        )
+        self.register_disposable(audio_out_sub)
 
         self._web_interface = RobotWebInterface(
             port=5555,

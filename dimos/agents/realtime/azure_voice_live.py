@@ -27,6 +27,7 @@ from typing import Any
 
 from reactivex.disposable import Disposable
 
+from dimos.stream.audio.base import AudioEvent
 from dimos.stream.audio.node_microphone import SounddeviceAudioSource
 
 from azure.ai.voicelive.aio import connect as voicelive_connect
@@ -45,6 +46,7 @@ from azure.core.credentials import AzureKeyCredential
 
 import numpy as np
 import sounddevice as sd  # type: ignore[import-untyped]
+from scipy.signal import resample_poly
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import Field
@@ -237,6 +239,7 @@ class AzureVoiceLiveAgent(Module):
     config: AzureVoiceLiveConfig
     agent: Out[BaseMessage]
     human_input: In[str]
+    web_audio_in: In[AudioEvent]
     agent_idle: Out[bool]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -256,6 +259,7 @@ class AzureVoiceLiveAgent(Module):
         self._first_tool_call_emitted = False
         self._mic: SounddeviceAudioSource | None = None
         self._mic_subscription: Any = None
+        self._web_audio_sub: Any = None
         self._human_input_sub: Any = None
         self._tool_stream_cleanup: Any = None
 
@@ -283,6 +287,10 @@ class AzureVoiceLiveAgent(Module):
         self._mic_subscription = self._mic.emit_audio().subscribe(
             on_next=self._on_mic_audio
         )
+        self._web_audio_sub = Disposable(
+            self.web_audio_in.subscribe(on_next=self._on_mic_audio)
+        )
+        self.register_disposable(self._web_audio_sub)
         self._playback = _VoicePlayback(
             sample_rate=cfg.sample_rate,
             device_index=cfg.speaker_device_index,
@@ -511,7 +519,15 @@ class AzureVoiceLiveAgent(Module):
             return
         if self._loop is None or self._conn is None:
             return
-        pcm = event.to_int16().data.tobytes()
+        target_sr = self.config.sample_rate
+        int16_event = event.to_int16()
+        samples = int16_event.data
+        if int16_event.sample_rate != target_sr:
+            resampled = resample_poly(
+                samples, up=target_sr, down=int16_event.sample_rate
+            )
+            samples = np.round(resampled).clip(-32768, 32767).astype(np.int16)
+        pcm = samples.tobytes()
         b64 = base64.b64encode(pcm).decode("ascii")
         asyncio.run_coroutine_threadsafe(
             self._conn.input_audio_buffer.append(audio=b64), self._loop
@@ -604,6 +620,12 @@ class AzureVoiceLiveAgent(Module):
             except Exception:
                 pass
             self._mic_subscription = None
+        if self._web_audio_sub is not None:
+            try:
+                self._web_audio_sub.dispose()
+            except Exception:
+                pass
+            self._web_audio_sub = None
         if self._mic is not None:
             try:
                 self._mic.stop()
