@@ -14,10 +14,7 @@ import pytest
 
 from azure.ai.voicelive.models import ServerEventType
 
-from dimos.agents.realtime.azure_voice_live import (
-    AzureVoiceLiveAgent,
-    AzureVoiceLiveConfig,
-)
+from dimos.agents.realtime.azure_voice_live import AzureVoiceLiveAgent
 
 
 @dataclass
@@ -34,12 +31,11 @@ class _FakeEvent:
 
 def _make_agent() -> AzureVoiceLiveAgent:
     """Construct an agent with WS-side dependencies replaced by mocks."""
-    config = AzureVoiceLiveConfig(
+    agent = AzureVoiceLiveAgent(
         endpoint="https://fake",
         api_key="fake",
         report_after_tools={"observe", "current_time"},
     )
-    agent = AzureVoiceLiveAgent(config=config)
 
     # Mock the Voice Live connection.
     conn = MagicMock()
@@ -88,3 +84,39 @@ async def _drain_tasks() -> None:
             return
         await asyncio.sleep(0)
     raise AssertionError("tasks did not settle")
+
+
+@pytest.mark.asyncio
+async def test_no_preface_when_audio_present_no_tool():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_DELTA, delta=b"\x00\x01"),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_TRANSCRIPT_DELTA, delta="hi"),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await _drain_tasks()
+    assert agent._conn.response.create.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_audio_present_then_silent_action_tool():
+    agent = _make_agent()
+    await _emit(
+        agent,
+        _FakeEvent(type=ServerEventType.RESPONSE_CREATED),
+        _FakeEvent(type=ServerEventType.RESPONSE_AUDIO_DELTA, delta=b"\x01"),
+        _FakeEvent(
+            type=ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE,
+            call_id="c1",
+            name="relative_move",
+            arguments='{"forward": 1.0}',
+        ),
+        _FakeEvent(type=ServerEventType.RESPONSE_DONE),
+    )
+    await _drain_tasks()
+    # function_call_output sent but NO response.create (silent action).
+    assert agent._conn.conversation.item.create.await_count == 1
+    assert agent._conn.response.create.call_count == 0
+    agent._mcp.call_tool.assert_called_once_with("relative_move", {"forward": 1.0})
