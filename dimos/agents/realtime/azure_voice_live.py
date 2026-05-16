@@ -35,12 +35,15 @@ from azure.ai.voicelive.models import (
     AudioEchoCancellation,
     AudioNoiseReduction,
     AzureStandardVoice,
+    FunctionCallOutputItem,
     InputAudioFormat,
+    InputTextContentPart,
     Modality,
     OutputAudioFormat,
     RequestSession,
     ServerEventType,
     ServerVad,
+    UserMessageItem,
 )
 from azure.core.credentials import AzureKeyCredential
 
@@ -400,11 +403,7 @@ class AzureVoiceLiveAgent(Module):
 
         async def _send() -> None:
             await self._conn.conversation.item.create(
-                item={
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": text}],
-                }
+                item=UserMessageItem(content=[InputTextContentPart(text=text)])
             )
             if prompt_response:
                 await self._conn.response.create()
@@ -580,11 +579,7 @@ class AzureVoiceLiveAgent(Module):
             self._tool_pool, self._invoke_mcp, name, arguments_json
         )
         await self._conn.conversation.item.create(
-            item={
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": output,
-            }
+            item=FunctionCallOutputItem(call_id=call_id, output=output)
         )
         logger.info(
             "DBG _dispatch_and_wait tool=%s in_report_after=%s output_len=%d",
