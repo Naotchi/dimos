@@ -176,6 +176,7 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
             "agent_first_call_s": _delta(ftc, t0),
             "speak_tts_s": speak_tts_s,
             "e2e_first_audio_s": _delta(fao, t0),
+            "first_tool_call_s": _delta(ftc, t0),
             "stt_s": _parse_duration(stt.get("duration_s")) if stt else None,
             "llm_total_s": sum(llm_durations) if llm_durations else None,
             "tools_total_s": sum(tools_durations) if tools_durations else None,
@@ -211,7 +212,7 @@ def _summarize(values: list[float | None]) -> dict[str, float]:
     }
 
 
-_METRIC_KEYS = (
+_AGENTIC_JA_METRIC_KEYS = (
     "e2e_first_audio_s",
     "agent_first_call_s",
     "speak_tts_s",
@@ -221,16 +222,37 @@ _METRIC_KEYS = (
     "turn_total_s",
 )
 
-def aggregate(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
+_VOICE_LIVE_METRIC_KEYS = (
+    "e2e_first_audio_s",
+    "first_tool_call_s",
+)
+
+
+def detect_mode(run_dir: Path) -> str:
+    """Infer 'agentic-ja' or 'voice-live' from the run-dir basename."""
+    name = Path(run_dir).name
+    if "voice-live" in name:
+        return "voice-live"
+    return "agentic-ja"
+
+
+def _metric_keys_for_mode(mode: str) -> tuple[str, ...]:
+    if mode == "voice-live":
+        return _VOICE_LIVE_METRIC_KEYS
+    return _AGENTIC_JA_METRIC_KEYS
+
+
+def aggregate(metrics: dict[str, dict[str, Any]], mode: str = "agentic-ja") -> dict[str, Any]:
     """Aggregate non-warmup turns into a single pool.
 
     Returns the count of live turns and a per-metric summary
-    (n / mean / p50 / p95 / max / min) for every key in _METRIC_KEYS.
+    (n / mean / p50 / p95 / max / min) for every key relevant to ``mode``.
     """
     live = [m for m in metrics.values() if not m["warmup"]]
+    keys = _metric_keys_for_mode(mode)
     return {
         "n_turns": len(live),
-        "metrics": {k: _summarize([m.get(k) for m in live]) for k in _METRIC_KEYS},
+        "metrics": {k: _summarize([m.get(k) for m in live]) for k in keys},
     }
 
 
@@ -260,6 +282,12 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_dir", nargs="?", default=None)
     parser.add_argument("--json", dest="json_out", default=None)
+    parser.add_argument(
+        "--config",
+        choices=("auto", "agentic-ja", "voice-live"),
+        default="auto",
+        help="Analyzer mode. 'auto' infers from run-dir basename.",
+    )
     args = parser.parse_args(argv[1:])
 
     run_dir = _pick_run(args.run_dir)
@@ -267,47 +295,63 @@ def main(argv: list[str]) -> int:
     if not jsonl.exists():
         sys.exit(f"missing {jsonl}")
 
+    mode = args.config if args.config != "auto" else detect_mode(run_dir)
+
     turns = build_turns(jsonl)
     metrics = compute_per_turn_metrics(turns)
-    agg = aggregate(metrics)
+    agg = aggregate(metrics, mode=mode)
 
     live = [m for m in metrics.values() if not m["warmup"]]
     print(f"run: {run_dir}")
+    print(f"mode: {mode}")
     print(f"turns analyzed (non-warmup): {len(live)} / {len(metrics)} total")
 
-    # Headline indicators.
+    # Headline indicators (mode-gated).
     print("\n== headline ==")
     efa = agg["metrics"]["e2e_first_audio_s"]
-    afc = agg["metrics"]["agent_first_call_s"]
-    sts = agg["metrics"]["speak_tts_s"]
     print(
         f"e2e_first_audio_s    n={efa['n']}/{len(live)}  "
         f"p50={efa['p50']:.2f}s  p95={efa['p95']:.2f}s"
     )
-    print(
-        f"agent_first_call_s   n={afc['n']}/{len(live)}  "
-        f"p50={afc['p50']:.2f}s  p95={afc['p95']:.2f}s"
-    )
-    n_no_speak = len(live) - sts["n"]
-    no_speak_note = f"  ({n_no_speak} turn(s) had no speak)" if n_no_speak else ""
-    print(
-        f"speak_tts_s          n={sts['n']}/{len(live)}  "
-        f"p50={sts['p50']:.2f}s  p95={sts['p95']:.2f}s{no_speak_note}"
-    )
+
+    if mode == "agentic-ja":
+        afc = agg["metrics"]["agent_first_call_s"]
+        sts = agg["metrics"]["speak_tts_s"]
+        print(
+            f"agent_first_call_s   n={afc['n']}/{len(live)}  "
+            f"p50={afc['p50']:.2f}s  p95={afc['p95']:.2f}s"
+        )
+        n_no_speak = len(live) - sts["n"]
+        no_speak_note = f"  ({n_no_speak} turn(s) had no speak)" if n_no_speak else ""
+        print(
+            f"speak_tts_s          n={sts['n']}/{len(live)}  "
+            f"p50={sts['p50']:.2f}s  p95={sts['p95']:.2f}s{no_speak_note}"
+        )
+    else:  # voice-live
+        ftc = agg["metrics"]["first_tool_call_s"]
+        n_no_tool = len(live) - ftc["n"]
+        no_tool_note = (
+            f"  ({n_no_tool} turn(s) had no tool call)" if n_no_tool else ""
+        )
+        print(
+            f"first_tool_call_s    n={ftc['n']}/{len(live)}  "
+            f"p50={ftc['p50']:.2f}s  p95={ftc['p95']:.2f}s{no_tool_note}"
+        )
 
     _print_table(f"all turns (n={len(live)})", agg["metrics"])
 
-    # Per-tool mcp_tool:* summary across all live turns.
-    tool_buckets: dict[str, list[float]] = defaultdict(list)
-    for m_id, m in metrics.items():
-        if m["warmup"]:
-            continue
-        for e in turns[m_id].get("mcp_tools", []):
-            if e["duration"] is not None:
-                tool_buckets[f"mcp_tool:{e['tool']}"].append(e["duration"])
-    if tool_buckets:
-        tool_rows = {k: _summarize(v) for k, v in sorted(tool_buckets.items())}
-        _print_table("mcp_tool:*", tool_rows)
+    # Per-tool mcp_tool:* summary across all live turns (agentic-ja only).
+    if mode == "agentic-ja":
+        tool_buckets: dict[str, list[float]] = defaultdict(list)
+        for m_id, m in metrics.items():
+            if m["warmup"]:
+                continue
+            for e in turns[m_id].get("mcp_tools", []):
+                if e["duration"] is not None:
+                    tool_buckets[f"mcp_tool:{e['tool']}"].append(e["duration"])
+        if tool_buckets:
+            tool_rows = {k: _summarize(v) for k, v in sorted(tool_buckets.items())}
+            _print_table("mcp_tool:*", tool_rows)
 
     if args.json_out:
         Path(args.json_out).write_text(

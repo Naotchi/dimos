@@ -156,3 +156,62 @@ def test_e2e_first_audio_s_computed_for_agentic_ja(jsonl_path):
     assert metrics["A"]["e2e_first_audio_s"] == pytest.approx(0.95)
     # Turn B: no first_audio_out (motion-only) -> None
     assert metrics["B"]["e2e_first_audio_s"] is None
+
+
+@pytest.fixture
+def voice_live_jsonl_path(tmp_path: Path) -> Path:
+    """Two voice-live turns:
+    - V1 (speak-only): user_audio_end -> first_audio_out, no first_tool_call
+    - V2 (tool + speak): user_audio_end -> first_tool_call -> first_audio_out
+    """
+    path = tmp_path / "main.jsonl"
+    lines = [
+        _line({"event_kind": "user_audio_end", "turn_id": "V1", "t": 0.0,
+               "fixture_id": "fx_01", "run_idx": 0, "warmup": False,
+               "wav_seconds": 1.0}),
+        _line({"event_kind": "first_audio_out", "turn_id": "V1", "t": 0.8}),
+        _line({"event_kind": "user_audio_end", "turn_id": "V2", "t": 0.0,
+               "fixture_id": "fx_07", "run_idx": 0, "warmup": False,
+               "wav_seconds": 1.2}),
+        _line({"event_kind": "first_tool_call", "turn_id": "V2", "t": 0.6,
+               "tool": "current_time"}),
+        _line({"event_kind": "first_audio_out", "turn_id": "V2", "t": 1.1}),
+    ]
+    path.write_text("".join(lines))
+    return path
+
+
+def test_voice_live_mode_minimal_events(voice_live_jsonl_path: Path) -> None:
+    turns = build_turns(voice_live_jsonl_path)
+    metrics = compute_per_turn_metrics(turns)
+    assert metrics["V1"]["e2e_first_audio_s"] == pytest.approx(0.8)
+    assert metrics["V2"]["e2e_first_audio_s"] == pytest.approx(1.1)
+    assert metrics["V2"]["first_tool_call_s"] == pytest.approx(0.6)
+    # V1 has no first_tool_call event — sibling-style None or absent (match existing patterns)
+    assert metrics["V1"].get("first_tool_call_s") is None
+
+
+def test_voice_live_mode_omits_ja_only_metrics(
+    voice_live_jsonl_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Move the JSONL into a parent dir whose name matches the voice-live pattern
+    # so auto-detection picks voice-live mode. main() expects a run-dir, not a JSONL path.
+    run_dir = voice_live_jsonl_path.parent
+    target = run_dir.parent / "2026-05-16-bench-agentic-voice-live"
+    target.mkdir()
+    (target / "main.jsonl").write_text(voice_live_jsonl_path.read_text())
+
+    from bench_agentic_ja import main as analyzer_main
+    analyzer_main(["bench_agentic_ja", str(target)])
+    out = capsys.readouterr().out
+    assert "e2e_first_audio_s" in out
+    assert "first_tool_call_s" in out
+    assert "agent_first_call_s" not in out
+    assert "speak_tts_s" not in out
+    assert "turn_total_s" not in out
+
+
+def test_mode_auto_detection_by_dir_name(tmp_path: Path) -> None:
+    from bench_agentic_ja import detect_mode
+    assert detect_mode(tmp_path / "2026-05-16-bench-agentic-ja") == "agentic-ja"
+    assert detect_mode(tmp_path / "2026-05-16-bench-agentic-voice-live") == "voice-live"
