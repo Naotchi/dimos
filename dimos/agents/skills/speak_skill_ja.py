@@ -21,6 +21,7 @@ from typing import Any
 
 import reactivex.operators as ops
 
+from dimos.agents.annotation import skill
 from dimos.agents.bench_ja import log_bench_event
 from dimos.agents.skills.speak_skill import SpeakSkill
 from dimos.core.core import rpc
@@ -63,8 +64,19 @@ class JapaneseSpeakSkill(SpeakSkill):
             self._first_chunk_pending = False
         log_bench_event("first_audio_out", tool="speak")
 
+    @skill
     def speak(self, text: str, blocking: bool = True) -> str:
-        """Arm the first-chunk flag, then delegate to upstream speak()."""
+        """Speak text out loud through the robot's speakers.
+
+        USE THIS TOOL AS OFTEN AS NEEDED. People can't normally see what you say in text, but can hear what you speak.
+
+        Try to be as concise as possible. Remember that speaking takes time, so get to the point quickly.
+
+        Example usage:
+
+            speak("こんにちは、ロボットアシスタントです。")
+        """
+        log_bench_event("speak_invoke")
         with self._first_chunk_lock:
             self._first_chunk_pending = True
         return super().speak(text, blocking=blocking)
