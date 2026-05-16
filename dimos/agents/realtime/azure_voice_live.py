@@ -558,6 +558,7 @@ class AzureVoiceLiveAgent(Module):
         else:
             instructions = "ユーザに日本語で短く一言返事をしてください。"
 
+        logger.info("DBG _force_preface instructions=%r", instructions)
         self._next_trigger = "preface_forced"
         self._resp_done_event = asyncio.Event()
         await self._conn.response.create(
@@ -566,7 +567,9 @@ class AzureVoiceLiveAgent(Module):
                 "instructions": instructions,
             }
         )
+        logger.info("DBG _force_preface response.create sent, waiting for RESPONSE_DONE")
         await self._resp_done_event.wait()
+        logger.info("DBG _force_preface RESPONSE_DONE received")
         self._resp_done_event = None
 
     async def _dispatch_and_wait(
@@ -583,6 +586,10 @@ class AzureVoiceLiveAgent(Module):
                 "output": output,
             }
         )
+        logger.info(
+            "DBG _dispatch_and_wait tool=%s in_report_after=%s output_len=%d",
+            name, name in self.config.report_after_tools, len(output),
+        )
         if name in self.config.report_after_tools:
             self._next_trigger = "tool_result"
             self._resp_done_event = asyncio.Event()
@@ -595,16 +602,27 @@ class AzureVoiceLiveAgent(Module):
                     ),
                 }
             )
+            logger.info("DBG _dispatch_and_wait report response.create sent")
             await self._resp_done_event.wait()
+            logger.info("DBG _dispatch_and_wait report RESPONSE_DONE received")
             self._resp_done_event = None
         # Silent path: no response.create — session waits for next user input.
 
     async def _on_response_done(self, snap: _ResponseSnapshot) -> None:
+        logger.info(
+            "DBG _on_response_done: trigger=%s had_audio=%s pending=%s",
+            snap.trigger, snap.had_audio,
+            [(name) for _, name, _ in snap.pending_calls],
+        )
         try:
             if not snap.had_audio:
+                logger.info("DBG forcing preface for %d pending", len(snap.pending_calls))
                 await self._force_preface(snap.pending_calls)
+                logger.info("DBG preface returned")
             for call_id, name, args in snap.pending_calls:
+                logger.info("DBG dispatching tool=%s", name)
                 await self._dispatch_and_wait(call_id, name, args)
+                logger.info("DBG dispatch returned tool=%s", name)
         except Exception:
             logger.exception("_on_response_done failed")
         finally:
@@ -662,6 +680,11 @@ class AzureVoiceLiveAgent(Module):
             )
         elif et == ServerEventType.RESPONSE_DONE:
             snap = self._snapshot_response_state()
+            logger.info(
+                "DBG RESPONSE_DONE trigger=%s had_audio=%s pending=%s text_len=%d",
+                snap.trigger, snap.had_audio,
+                [n for _, n, _ in snap.pending_calls], len(snap.text),
+            )
             if snap.text:
                 logger.info("assistant: %s", snap.text)
                 self.agent.publish(AIMessage(content=snap.text))
