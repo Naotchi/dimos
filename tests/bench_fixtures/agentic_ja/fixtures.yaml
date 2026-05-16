@@ -1,68 +1,42 @@
 version: 1
 fixtures:
-  # speak_only: short greetings / Q&A that should yield 'speak' only.
-  - id: speak_001
-    category: speak_only
-    wav: speak_001.wav
+  - id: fx_01
+    wav: fx_01.wav
     text: "おはよう"
-    notes: "short greeting"
-  - id: speak_002
-    category: speak_only
-    wav: speak_002.wav
+    notes: "speak only — short greeting"
+  - id: fx_02
+    wav: fx_02.wav
     text: "自己紹介してください"
-    notes: "self introduction"
-  - id: speak_003
-    category: speak_only
-    wav: speak_003.wav
-    text: "今日の天気はどう"
-    notes: "small talk"
-  - id: speak_004
-    category: speak_only
-    wav: speak_004.wav
+    notes: "speak only — intro"
+  - id: fx_03
+    wav: fx_03.wav
     text: "ありがとう"
-    notes: "thanks"
-
-  # motion_only: imperative motion commands. May still produce a brief speak
-  # ack, but the primary intent is a motion tool.
-  - id: motion_001
-    category: motion_only
-    wav: motion_001.wav
-    text: "前に進んで"
-    notes: "move forward"
-  - id: motion_002
-    category: motion_only
-    wav: motion_002.wav
-    text: "お座り"
-    notes: "sit"
-  - id: motion_003
-    category: motion_only
-    wav: motion_003.wav
-    text: "立って"
-    notes: "stand"
-  - id: motion_004
-    category: motion_only
-    wav: motion_004.wav
-    text: "右を向いて"
-    notes: "turn right"
-
-  # both: combined commands that should yield both speak and motion.
-  - id: both_001
-    category: both
-    wav: both_001.wav
+    notes: "speak only — thanks"
+  - id: fx_04
+    wav: fx_04.wav
     text: "立ち上がって挨拶してください"
-    notes: "stand + greet"
-  - id: both_002
-    category: both
-    wav: both_002.wav
-    text: "前に進んで、進んだら教えて"
-    notes: "move + announce"
-  - id: both_003
-    category: both
-    wav: both_003.wav
-    text: "お座りして自己紹介して"
-    notes: "sit + introduce"
-  - id: both_004
-    category: both
-    wav: both_004.wav
-    text: "右を向いて何が見えるか教えて"
-    notes: "turn + report"
+    notes: "sport + speak"
+  - id: fx_05
+    wav: fx_05.wav
+    text: "お座りしてよろしくって言って"
+    notes: "sport + speak"
+  - id: fx_06
+    wav: fx_06.wav
+    text: "踊って、その後感想を言って"
+    notes: "sport + speak (sequential likely)"
+  - id: fx_07
+    wav: fx_07.wav
+    text: "今何時か教えて"
+    notes: "current_time + speak"
+  - id: fx_08
+    wav: fx_08.wav
+    text: "1メートル前に進んで、着いたら教えて"
+    notes: "relative_move + speak (sequential)"
+  - id: fx_09
+    wav: fx_09.wav
+    text: "伏せて"
+    notes: "sport only — no speak"
+  - id: fx_10
+    wav: fx_10.wav
+    text: "今日の予定を3つ提案して"
+    notes: "speak only — longer output"
