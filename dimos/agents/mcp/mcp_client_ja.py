@@ -37,7 +37,7 @@ class TimedMcpClient(McpClient):
     Emits:
       - llm_step       : duration of each 'agent' node in the LangGraph stream
       - <node>_step    : duration of each non-'agent' node (typically 'tools')
-      - first_motion_tool : first tool_call where tool name != 'speak', once per turn
+      - first_tool_call : first tool_call observed in any LLM step, once per turn
       - turn_done      : total turn time, llm time, step count, tool call count
     """
 
@@ -54,25 +54,31 @@ class TimedMcpClient(McpClient):
         step_idx = 0
         total_llm = 0.0
         n_tool_calls = 0
-        motion_logged = False
+        first_tool_logged = False
 
+        # LangGraph's prebuilt agent node has been called "agent" historically
+        # and "model" in newer versions; treat both as the LLM step.
+        llm_nodes = ("agent", "model")
         for update in state_graph.stream({"messages": self._history}, stream_mode="updates"):
             for node_name, node_output in update.items():
                 elapsed = time.perf_counter() - step_t0
                 msgs = node_output.get("messages", []) if isinstance(node_output, dict) else []
-                kind = "llm_step" if node_name == "agent" else f"{node_name}_step"
+                kind = "llm_step" if node_name in llm_nodes else f"{node_name}_step"
 
-                if node_name == "agent":
+                if node_name in llm_nodes:
                     total_llm += elapsed
                     for m in msgs:
                         tool_calls = getattr(m, "tool_calls", []) or []
                         n_tool_calls += len(tool_calls)
-                        if not motion_logged:
+                        if not first_tool_logged:
                             for tc in tool_calls:
-                                tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-                                if tool_name and tool_name != "speak":
-                                    log_bench_event("first_motion_tool", tool=tool_name)
-                                    motion_logged = True
+                                tool_name = (
+                                    tc.get("name") if isinstance(tc, dict)
+                                    else getattr(tc, "name", None)
+                                )
+                                if tool_name:
+                                    log_bench_event("first_tool_call", tool=tool_name)
+                                    first_tool_logged = True
                                     break
 
                 log_bench_event(
