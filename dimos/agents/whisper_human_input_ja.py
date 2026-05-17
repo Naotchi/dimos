@@ -30,15 +30,17 @@ Bench instrumentation mirrors :mod:`dimos.agents.web_human_input_ja` so the
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 import reactivex as rx
 import reactivex.operators as ops
+from pydantic import Field
 
 from dimos.agents.bench_ja import log_bench_event
 from dimos.core.core import rpc
-from dimos.core.module import Module
+from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In
 from dimos.core.transport import pLCMTransport
 from dimos.stream.audio.base import AudioEvent
@@ -47,6 +49,17 @@ from dimos.stream.audio.stt.node_whisper import WhisperNode
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
+
+_ENV_PREFIX = "DIMOS_WHISPER_"
+
+
+class WhisperHumanInputJaConfig(ModuleConfig):
+    model: str = Field(
+        default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}MODEL", "base")
+    )
+    fp16: bool = Field(
+        default_factory=lambda: os.environ.get(f"{_ENV_PREFIX}FP16", "0") == "1"
+    )
 
 
 def _make_stt_timer() -> tuple[Any, Any]:
@@ -83,6 +96,7 @@ def _make_stt_timer() -> tuple[Any, Any]:
 class WhisperHumanInputJa(Module):
     """Bridge: AudioEvent utterances → Japanese Whisper → ``/human_input``."""
 
+    config: WhisperHumanInputJaConfig
     mic_utterance: In[AudioEvent]
 
     _audio_subject: rx.subject.Subject  # type: ignore[type-arg]
@@ -96,7 +110,15 @@ class WhisperHumanInputJa(Module):
         self._audio_subject = rx.subject.Subject()
 
         normalizer = AudioNormalizer()
-        stt_node = WhisperNode(modelopts={"language": "ja", "fp16": False})
+        stt_node = WhisperNode(
+            model=self.config.model,
+            modelopts={"language": "ja", "fp16": self.config.fp16},
+        )
+        logger.info(
+            "WhisperHumanInputJa loading model=%s fp16=%s",
+            self.config.model,
+            self.config.fp16,
+        )
 
         audio_tap, text_tap = _make_stt_timer()
         normalizer.consume_audio(self._audio_subject.pipe(ops.share()))
@@ -111,7 +133,7 @@ class WhisperHumanInputJa(Module):
         gate_unsub = self.mic_utterance.subscribe(self._audio_subject.on_next)
         self.register_disposable(gate_unsub)
 
-        logger.info("WhisperHumanInputJa started (Whisper ja, fp16=False)")
+        logger.info("WhisperHumanInputJa started (Whisper ja)")
 
     @rpc
     def stop(self) -> None:
@@ -121,4 +143,4 @@ class WhisperHumanInputJa(Module):
         super().stop()
 
 
-__all__ = ["WhisperHumanInputJa"]
+__all__ = ["WhisperHumanInputJa", "WhisperHumanInputJaConfig"]
