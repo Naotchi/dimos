@@ -280,7 +280,13 @@ async def amain() -> int:
     local.warmup()
     print("(opening Voice Live session...)", flush=True)
     vl = VoiceLiveStt()
-    await vl.open()
+    try:
+        await vl.open()
+    except Exception as exc:
+        print(f"FATAL: Voice Live session open failed: {exc!r}", file=sys.stderr)
+        mic.stop()
+        ptt.stop()
+        return 1
     print("[SPACE] 録音 / [q] 終了", flush=True)
     turn = 0
     try:
@@ -300,10 +306,18 @@ async def amain() -> int:
             pcm = mic.end()
             seconds = len(pcm) / 2 / SAMPLE_RATE
             print(f"(captured {seconds:.2f}s)", flush=True)
-            (local_text, local_ms), (vl_text, vl_ms) = await asyncio.gather(
-                local.transcribe(pcm),
-                vl.transcribe(pcm),
-            )
+            local_task = asyncio.create_task(local.transcribe(pcm))
+            vl_task = asyncio.create_task(vl.transcribe(pcm))
+            await asyncio.gather(local_task, vl_task, return_exceptions=True)
+
+            def _unwrap(task: asyncio.Task[tuple[str, float]], label: str) -> tuple[str, float]:
+                exc = task.exception()
+                if exc is not None:
+                    return (f"[{label} error: {exc!r}]", 0.0)
+                return task.result()
+
+            local_text, local_ms = _unwrap(local_task, "local")
+            vl_text, vl_ms = _unwrap(vl_task, "vl")
             if local_text == vl_text:
                 print(f"match         : {local_text}", flush=True)
                 print(f"              : local {local_ms:.2f}s / vl {vl_ms:.2f}s", flush=True)
