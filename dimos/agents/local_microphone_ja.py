@@ -119,6 +119,19 @@ class LocalMicrophoneJa(Module):
             self._recording = False
         super().stop()
 
+    @rpc
+    def inject_utterance(self, wav_path: str) -> None:
+        """Bench-only entry point: publish a wav fixture as a single utterance.
+
+        Bypasses the PortAudio capture path and the PTT gate so the bench
+        replay driver can drive the agent without a real microphone or
+        keyboard. Intended for use from scripts/replay_agentic_local_tts.py.
+        """
+        event = _load_wav_as_audio_event(wav_path)
+        logger.info("inject_utterance: %s (%d samples @ %d Hz)",
+                    wav_path, event.data.shape[0], event.sample_rate)
+        self.mic_utterance.publish(event)
+
     def _on_gate(self, active: bool) -> None:
         if active:
             with self._lock:
@@ -168,6 +181,32 @@ class LocalMicrophoneJa(Module):
         self.mic_utterance.publish(utterance)
 
 
+def _load_wav_as_audio_event(path: str) -> AudioEvent:
+    """Load a PCM16 mono WAV from disk and return an AudioEvent.
+
+    Used by the bench replay driver to feed fixture wavs into the same
+    mic_utterance stream a real PTT-held microphone would publish to.
+    """
+    import wave
+
+    with wave.open(path, "rb") as w:
+        if w.getnchannels() != 1:
+            raise ValueError(f"expected mono wav, got {w.getnchannels()} channels: {path}")
+        if w.getsampwidth() != 2:
+            raise ValueError(f"expected 16-bit PCM wav: {path}")
+        sample_rate = w.getframerate()
+        n_frames = w.getnframes()
+        raw = w.readframes(n_frames)
+
+    data = np.frombuffer(raw, dtype=np.int16)
+    return AudioEvent(
+        data=data,
+        sample_rate=sample_rate,
+        timestamp=time.time(),
+        channels=1,
+    )
+
+
 def _combine(events: list[AudioEvent]) -> AudioEvent | None:
     """Concatenate per-frame AudioEvents into one. Returns None if empty."""
     valid = [e for e in events if e is not None and getattr(e.data, "size", 0) > 0]
@@ -183,4 +222,4 @@ def _combine(events: list[AudioEvent]) -> AudioEvent | None:
     )
 
 
-__all__ = ["LocalMicrophoneJa", "LocalMicrophoneJaConfig"]
+__all__ = ["LocalMicrophoneJa", "LocalMicrophoneJaConfig", "_load_wav_as_audio_event"]
