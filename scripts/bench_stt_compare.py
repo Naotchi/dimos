@@ -350,6 +350,9 @@ async def amain() -> int:
             pcm = mic.end()
             seconds = len(pcm) / 2 / SAMPLE_RATE
             print(f"(captured {seconds:.2f}s)", flush=True)
+            if seconds < 0.3:
+                print("(skipped: capture too short)", flush=True)
+                continue
             local_task = asyncio.create_task(local.transcribe(pcm))
             vl_task = asyncio.create_task(vl.transcribe(pcm))
             await asyncio.gather(local_task, vl_task, return_exceptions=True)
