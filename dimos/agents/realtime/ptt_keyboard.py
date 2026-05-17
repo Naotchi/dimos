@@ -5,25 +5,28 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Push-to-talk keyboard module for AzureVoiceLiveAgent.
+"""Push-to-talk global hotkey module for AzureVoiceLiveAgent.
 
-Opens a small pygame window. While SPACE is held, publishes True on the
-``mic_gate`` Out port; on release, publishes False. The Voice Live agent
-gates microphone forwarding based on these events.
+Uses ``pynput.keyboard.Listener`` so the PTT key works regardless of which
+OS window has focus. While the trigger key is held, publishes True on the
+``mic_gate`` Out port; on release, publishes False.
 
-Mirrors the dependency / window pattern of dimos.robot.unitree.keyboard_teleop
-so the PTT window sits naturally next to rerun and other tooling windows.
+Default trigger is F9. Override with the ``DIMOS_PTT_KEY`` env var
+(case-insensitive). Accepts pynput key names (``f1``-``f24``, ``space``,
+``tab``, ``ctrl_l``/``ctrl_r``, ``shift_l``/``shift_r``, ``alt_l``/``alt_r``,
+``esc``, ...) or any single character (``a``, `` ` ``).
+
+The listener does NOT suppress the key - it stays observable to other
+applications. Requires X11 (Wayland is not supported by pynput).
 """
 from __future__ import annotations
 
 import os
-import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import pygame
+from pynput.keyboard import Key, KeyCode, Listener
 
-from dimos.constants import DEFAULT_THREAD_JOIN_TIMEOUT
 from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.core.stream import Out
@@ -31,18 +34,8 @@ from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
-os.environ.setdefault("SDL_VIDEODRIVER", "x11")
-
-_WINDOW_WIDTH = 400
-_WINDOW_HEIGHT = 150
-_FONT_SIZE = 24
-_LOOP_RATE_HZ = 60
-_BG_COLOR = (30, 30, 30)
-_IDLE_COLOR = (120, 120, 120)
-_REC_COLOR = (220, 60, 60)
-_TEXT_COLOR = (220, 220, 220)
-_HINT_COLOR = (150, 150, 150)
-_INDICATOR_RADIUS = 18
+_ENV_KEY = "DIMOS_PTT_KEY"
+_DEFAULT_KEY = "f9"
 
 
 @dataclass
@@ -54,14 +47,15 @@ def process_ptt_event(
     state: PttState,
     kind: str,
     key: str,
+    trigger: str,
     emit: Callable[[bool], None],
 ) -> None:
     """Pure state transition for PTT key events.
 
-    ``kind`` is "keydown" or "keyup"; ``key`` is the lowercased key name
-    (only "space" is acted on). ``emit`` is called once per state change.
+    ``kind`` is "keydown" or "keyup"; ``key`` and ``trigger`` are lowercased
+    key names. ``emit`` is called once per state change.
     """
-    if key != "space":
+    if key.lower() != trigger.lower():
         return
     if kind == "keydown" and not state.active:
         state.active = True
@@ -71,35 +65,74 @@ def process_ptt_event(
         emit(False)
 
 
+def _parse_key(name: str) -> Key | KeyCode:
+    """Resolve a key name to a pynput ``Key`` or ``KeyCode``.
+
+    Raises ``ValueError`` for unrecognised names so misconfiguration is
+    surfaced at construction time, not at first keystroke.
+    """
+    lowered = name.strip().lower()
+    if not lowered:
+        raise ValueError("empty PTT key name")
+    # Named special keys (f1-f24, space, ctrl_l, ...) live as Key attributes.
+    if hasattr(Key, lowered):
+        return getattr(Key, lowered)
+    if len(lowered) == 1:
+        return KeyCode.from_char(lowered)
+    raise ValueError(f"unrecognised PTT key name: {name!r}")
+
+
+def _key_to_name(key: Any) -> str:
+    """Return a lowercase canonical name for a pynput event key.
+
+    pynput passes either a ``Key`` (special) or ``KeyCode`` (char) to
+    callbacks. We normalise to the same string form used by ``_parse_key``.
+    """
+    if isinstance(key, Key):
+        return key.name
+    if isinstance(key, KeyCode) and key.char is not None:
+        return key.char.lower()
+    return ""
+
+
 class PttKeyboard(Module):
-    """Pygame window that drives a boolean ``mic_gate`` while SPACE is held."""
+    """Global hotkey that drives a boolean ``mic_gate`` while a key is held."""
 
     mic_gate: Out[bool]
 
     _state: PttState
-    _stop_event: threading.Event
-    _thread: threading.Thread | None = None
-    _screen: Any = None
-    _font: Any = None
-    _clock: Any = None
+    _trigger_key: Key | KeyCode
+    _trigger_key_name: str
+    _listener: Listener | None = None
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, trigger_key: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._state = PttState(active=False)
-        self._stop_event = threading.Event()
+
+        name = trigger_key if trigger_key is not None else os.environ.get(_ENV_KEY, _DEFAULT_KEY)
+        self._trigger_key_name = name.strip().lower()
+        self._trigger_key = _parse_key(self._trigger_key_name)
+
+        if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+            logger.warning(
+                "PttKeyboard: XDG_SESSION_TYPE=wayland detected; pynput global "
+                "hotkeys do not work reliably on Wayland. Consider switching to "
+                "an X11 session if PTT does not respond."
+            )
 
     @rpc
     def start(self) -> None:
         super().start()
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._pygame_loop, daemon=True)
-        self._thread.start()
+        self._listener = Listener(on_press=self._on_press, on_release=self._on_release)
+        self._listener.daemon = True
+        self._listener.start()
+        logger.info("PttKeyboard listening for %s (set DIMOS_PTT_KEY to override)", self._trigger_key_name)
 
     @rpc
     def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(DEFAULT_THREAD_JOIN_TIMEOUT)
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
         if self._state.active:
             self.mic_gate.publish(False)
             self._state.active = False
@@ -109,43 +142,20 @@ class PttKeyboard(Module):
         logger.info("PTT mic_gate=%s", value)
         self.mic_gate.publish(value)
 
-    def _pygame_loop(self) -> None:
-        pygame.init()
-        pygame.key.set_repeat()
-        self._screen = pygame.display.set_mode(
-            (_WINDOW_WIDTH, _WINDOW_HEIGHT), pygame.SWSURFACE
+    def _on_press(self, key: Any) -> None:
+        process_ptt_event(
+            self._state,
+            kind="keydown",
+            key=_key_to_name(key),
+            trigger=self._trigger_key_name,
+            emit=self._emit,
         )
-        pygame.display.set_caption("Voice Live PTT")
-        self._clock = pygame.time.Clock()
-        self._font = pygame.font.Font(None, _FONT_SIZE)
 
-        while not self._stop_event.is_set():
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self._stop_event.set()
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    process_ptt_event(
-                        self._state, kind="keydown", key="space", emit=self._emit
-                    )
-                elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-                    process_ptt_event(
-                        self._state, kind="keyup", key="space", emit=self._emit
-                    )
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    self._stop_event.set()
-
-            self._render()
-            self._clock.tick(_LOOP_RATE_HZ)
-
-        pygame.quit()
-
-    def _render(self) -> None:
-        self._screen.fill(_BG_COLOR)
-        color = _REC_COLOR if self._state.active else _IDLE_COLOR
-        pygame.draw.circle(self._screen, color, (40, 75), _INDICATOR_RADIUS)
-        status = "Recording..." if self._state.active else "Idle"
-        text_surf = self._font.render(status, True, _TEXT_COLOR)
-        self._screen.blit(text_surf, (75, 65))
-        hint = self._font.render("Hold SPACE to talk", True, _HINT_COLOR)
-        self._screen.blit(hint, (20, 20))
-        pygame.display.flip()
+    def _on_release(self, key: Any) -> None:
+        process_ptt_event(
+            self._state,
+            kind="keyup",
+            key=_key_to_name(key),
+            trigger=self._trigger_key_name,
+            emit=self._emit,
+        )

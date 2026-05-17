@@ -36,6 +36,7 @@ from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.agents.mcp.mcp_server import McpServer
 from dimos.agents.system_prompt_ja import SYSTEM_PROMPT_JA
 from dimos.core.coordination.blueprints import autoconnect
+from dimos.experimental.security_demo.security_module import SecurityModule
 from dimos.robot.unitree.go2.blueprints.agentic._common_agentic_ja import _common_agentic_ja
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial_bounded import (
     unitree_go2_spatial_bounded,
@@ -43,11 +44,14 @@ from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial_bounded import
 
 _LLM_MODEL = os.environ.get("DIMOS_LLM_MODEL", "gpt-4o")
 
+# SecurityModule は spatial_bounded に含まれるが SpeakSkillSpec satisfier を
+# 必要とする。local-tts では LLM 応答テキストを直接 TTS に流す方針なので、
+# SpeakSkill 系を一切置かない。よってここでは SecurityModule ごと無効化する。
 unitree_go2_agentic_local_tts = autoconnect(
     unitree_go2_spatial_bounded,
     McpServer.blueprint(),
     TimedMcpClient.blueprint(model=_LLM_MODEL, system_prompt=SYSTEM_PROMPT_JA),
     _common_agentic_ja,
-)
+).disabled_modules(SecurityModule)
 
 __all__ = ["unitree_go2_agentic_local_tts"]

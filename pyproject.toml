@@ -95,6 +95,7 @@ dependencies = [
     "azure-identity>=1.25.3",
     "pyaudio>=0.2.14",
     "aiohttp>=3.13.5",
+    "pynput>=1.8.2",
 ]
 
 
