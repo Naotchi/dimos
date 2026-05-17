@@ -49,8 +49,10 @@ from azure.ai.voicelive.aio import connect as voicelive_connect
 from azure.ai.voicelive.models import (
     AudioInputTranscriptionOptions,
     InputAudioFormat,
+    Modality,
     RequestSession,
     ServerEventType,
+    ServerVad,
 )
 from azure.core.credentials import AzureKeyCredential
 from faster_whisper import WhisperModel  # type: ignore[import-untyped]
@@ -215,9 +217,15 @@ class VoiceLiveStt:
         self._conn = await self._conn_cm.__aenter__()
         await self._conn.session.update(
             session=RequestSession(
+                modalities=[Modality.TEXT],
                 instructions="",
                 input_audio_format=InputAudioFormat.PCM16,
-                turn_detection=None,  # commit を明示送信する
+                turn_detection=ServerVad(
+                    threshold=0.5,
+                    prefix_padding_ms=300,
+                    silence_duration_ms=500,
+                    create_response=False,
+                ),
                 input_audio_transcription=AudioInputTranscriptionOptions(
                     model=_VL_STT_MODEL, language="ja"
                 ),
@@ -236,6 +244,9 @@ class VoiceLiveStt:
         try:
             async for event in self._conn:
                 etype = getattr(event, "type", None)
+                if etype == ServerEventType.ERROR:
+                    err = getattr(event, "error", None)
+                    print(f"[VL error] {err!r}", file=sys.stderr, flush=True)
                 if etype == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED:
                     transcript = getattr(event, "transcript", "") or ""
                     await self._transcript_q.put((transcript, True))
@@ -252,10 +263,19 @@ class VoiceLiveStt:
         # Drain any stale event before sending.
         while not self._transcript_q.empty():
             self._transcript_q.get_nowait()
-        b64 = base64.b64encode(pcm).decode("ascii")
         t0 = time.perf_counter()
-        await self._conn.input_audio_buffer.append(audio=b64)
-        await self._conn.input_audio_buffer.commit()
+        # Stream audio in 50ms chunks, then append 800ms of silence so
+        # ServerVad detects silence_duration_ms=500 and auto-commits.
+        # Do NOT call input_audio_buffer.commit() manually — that races
+        # with audio processing and yields "buffer too small" errors.
+        frame_bytes = int(SAMPLE_RATE * 0.05) * 2  # 50ms * int16 mono
+        padded = pcm + b"\x00" * (frame_bytes * 16)  # +800ms silence
+        for i in range(0, len(padded), frame_bytes):
+            frame = padded[i : i + frame_bytes]
+            if not frame:
+                break
+            b64 = base64.b64encode(frame).decode("ascii")
+            await self._conn.input_audio_buffer.append(audio=b64)
         try:
             text, _ok = await asyncio.wait_for(
                 self._transcript_q.get(), timeout=_VL_TIMEOUT_S
