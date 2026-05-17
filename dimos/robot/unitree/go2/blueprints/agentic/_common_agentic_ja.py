@@ -17,7 +17,7 @@
 
 from dimos.agents.skills.navigation import NavigationSkillContainer
 from dimos.agents.skills.person_follow import PersonFollowSkillContainer
-from dimos.agents.skills.speak_skill_ja import JapaneseSpeakSkill
+from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 from dimos.agents.web_human_input_ja import JapaneseWebInput
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.connection import GO2Connection
@@ -28,7 +28,7 @@ _common_agentic_ja = autoconnect(
     PersonFollowSkillContainer.blueprint(camera_info=GO2Connection.camera_info_static),
     UnitreeSkillContainer.blueprint(),
     JapaneseWebInput.blueprint(),
-    JapaneseSpeakSkill.blueprint(),
+    AssistantSpeechNodeJa.blueprint(),
 )
 
 __all__ = ["_common_agentic_ja"]
