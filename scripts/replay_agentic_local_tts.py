@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Replay wav fixtures through the unitree_go2_agentic_local_tts blueprint.
 
-Boots the blueprint in-process, then uses the existing /upload_audio HTTP
-endpoint (served by RobotWebInterface on port 5555, same endpoint the WebUI
-uses) to inject fixture wavs. The endpoint runs inside the JapaneseWebInput
-worker subprocess, decodes via ffmpeg, and pushes the AudioEvent into the
-in-subprocess audio_subject -> Whisper -> agent pipeline.
+Boots the blueprint in-process, then injects fixture wavs directly into
+LocalMicrophoneJa.inject_utterance, which publishes them to the mic_utterance
+Out stream — bypassing PortAudio and the PTT gate — so no real microphone or
+HTTP server is needed.
 
 After publishing each wav we emit a `user_audio_end` bench event so the
 analyzer can compute end-to-end latencies relative to that timestamp.
@@ -28,10 +27,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import requests
 import yaml
 
 from dimos.agents.bench_ja import log_bench_event, new_turn, reset
+from dimos.agents.local_microphone_ja import LocalMicrophoneJa
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.core.global_config import global_config
@@ -39,9 +38,6 @@ from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts im
     unitree_go2_agentic_local_tts,
 )
 from dimos.utils.logging_config import set_run_log_dir
-
-WEB_PORT = 5555
-UPLOAD_URL = f"http://localhost:{WEB_PORT}/upload_audio"
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,36 +103,8 @@ def configure_log_dir(out_override: str | None) -> Path:
 def boot_blueprint() -> tuple[ModuleCoordinator, TimedMcpClient]:
     """Build the blueprint; return coordinator and the (proxy) mcp_client."""
     coordinator = ModuleCoordinator.build(unitree_go2_agentic_local_tts, blueprint_args={})
-    # JapaneseWebInput runs in a worker subprocess; we reach it via /upload_audio.
-    # We still need TimedMcpClient.agent_idle (cross-process Out works via dimos
-    # streams; the subscribe below pulls events back to this process).
     mcp_client = coordinator.get_instance(TimedMcpClient)
     return coordinator, mcp_client
-
-
-def wait_for_web_interface(timeout: float = 30.0) -> bool:
-    """Poll /upload_audio until it responds (404/405 = up, ConnectionError = down)."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = requests.get(f"http://localhost:{WEB_PORT}/text_streams", timeout=1.0)
-            if r.status_code == 200:
-                return True
-        except requests.RequestException:
-            pass
-        time.sleep(0.5)
-    return False
-
-
-def post_wav(wav_path: Path) -> bool:
-    """POST wav to /upload_audio. Returns True on 2xx, False otherwise."""
-    with wav_path.open("rb") as f:
-        files = {"file": (wav_path.name, f, "audio/wav")}
-        r = requests.post(UPLOAD_URL, files=files, timeout=30.0)
-    if r.status_code // 100 != 2:
-        print(f"[replay] upload failed for {wav_path}: {r.status_code} {r.text}", file=sys.stderr)
-        return False
-    return True
 
 
 def main() -> int:
@@ -144,6 +112,11 @@ def main() -> int:
     if args.simulation:
         global_config.update(simulation=True)
     out_dir = configure_log_dir(args.out)
+    print(
+        f"[replay] logging to {out_dir} (connection={global_config.unitree_connection_type})",
+        flush=True,
+    )
+
     label = args.label or os.environ.get("DIMOS_LLM_MODEL") or "unlabeled"
     log_bench_event(
         "run_meta",
@@ -160,16 +133,13 @@ def main() -> int:
         ),
         started_at=datetime.now().isoformat(),
     )
-    print(
-        f"[replay] logging to {out_dir} (connection={global_config.unitree_connection_type})",
-        flush=True,
-    )
 
     fx_path = Path(args.fixtures)
     manifest = yaml.safe_load(fx_path.read_text())
     fixtures = manifest["fixtures"]
 
     coordinator, mcp_client = boot_blueprint()
+    mic = coordinator.get_instance(LocalMicrophoneJa)
 
     idle_event = threading.Event()
 
@@ -181,16 +151,10 @@ def main() -> int:
 
     mcp_client.agent_idle.subscribe(on_idle)
 
-    print(f"[replay] waiting for web interface on port {WEB_PORT}...", flush=True)
-    if not wait_for_web_interface(timeout=args.initial_idle_timeout):
-        print("[replay] web interface never came up", file=sys.stderr)
-        coordinator.stop()
-        return 2
-
     # NOTE: agent_idle is only published after the first turn completes
     # (see TimedMcpClient._process_message), so we cannot wait for an
-    # "initial idle" here — we just send the first wav once the web
-    # interface is up, then wait for idle between subsequent wavs.
+    # "initial idle" here — we just inject the first wav once the modules
+    # are up, then wait for idle between subsequent wavs.
 
     schedule = list(fixture_iter(fixtures, args.runs, args.warmup, args.shuffle))
     print(f"[replay] {len(schedule)} runs scheduled", flush=True)
@@ -204,10 +168,9 @@ def main() -> int:
         wav_path = fx_path.parent / fx["wav"]
         audio_seconds = wav_seconds(wav_path)
 
-        # t=0: about to hand the wav to /upload_audio. We log BEFORE post_wav
-        # because the upload handler runs the STT pipeline synchronously
-        # (audio_subject.on_next), so post_wav blocks until stt_done is
-        # already emitted; logging after would invert the timeline.
+        # t=0: about to hand the wav to the mic. Publishing into mic_utterance
+        # runs Whisper STT in the same process synchronously, so logging
+        # BEFORE inject keeps the timeline ordered.
         reset()
         new_turn()
         log_bench_event(
@@ -218,12 +181,15 @@ def main() -> int:
             warmup=fx["warmup"],
         )
 
-        ok = post_wav(wav_path)
-        if not ok:
+        try:
+            mic.inject_utterance(str(wav_path))
+        except Exception as e:
+            print(f"[replay] inject failed for {fx['id']}: {e}", file=sys.stderr)
             log_bench_event(
-                "upload_failed",
+                "inject_failed",
                 fixture_id=fx["id"],
                 run_idx=fx["run_idx"],
+                error=str(e),
             )
             continue
 
