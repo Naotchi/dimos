@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Japanese SpeakSkill variant: pyopenjtalk TTS + first_audio_out bench event."""
+"""Speak assistant messages directly via local Japanese TTS.
+
+Subscribes to ``McpClient.agent: Out[BaseMessage]`` (autoconnect wires by
+``(name, type)``) and feeds the text content of each ``AIMessage`` straight
+into ``OpenJTalkTTSNode`` -> ``SounddeviceAudioOutput``. Replaces the previous
+``JapaneseSpeakSkill`` which exposed a ``speak`` tool to the LLM.
+"""
 
 from __future__ import annotations
 
@@ -20,63 +26,84 @@ import threading
 from typing import Any
 
 import reactivex.operators as ops
+from langchain_core.messages import AIMessage
+from langchain_core.messages.base import BaseMessage
+from reactivex import Subject
+from reactivex.disposable import Disposable
 
-from dimos.agents.annotation import skill
 from dimos.agents.bench_ja import log_bench_event
-from dimos.agents.skills.speak_skill import SpeakSkill
 from dimos.core.core import rpc
 from dimos.core.module import Module
+from dimos.core.stream import In
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 
 
-class JapaneseSpeakSkill(SpeakSkill):
-    """SpeakSkill that synthesizes Japanese via pyopenjtalk and emits first_audio_out.
+class AssistantSpeechNodeJa(Module):
+    """Speak assistant message text via local Japanese TTS.
 
-    - Overrides start() to bypass SpeakSkill.start (which would init OpenAITTSNode)
-      and wire OpenJTalkTTSNode -> SounddeviceAudioOutput at 48 kHz.
-    - Taps the audio stream with do_action so the first chunk emitted after each
-      speak() call fires a 'first_audio_out' bench event.
+    Wired by autoconnect to ``McpClient.agent`` (Out[BaseMessage]) via the
+    matching ``agent: In[BaseMessage]`` field name + type.
     """
 
-    _first_chunk_pending: bool
-    _first_chunk_lock: threading.Lock
+    agent: In[BaseMessage]
 
     @rpc
     def start(self) -> None:
-        # Skip SpeakSkill.start (which constructs OpenAITTSNode); call grandparent.
-        Module.start(self)
+        super().start()
 
         self._first_chunk_pending = False
         self._first_chunk_lock = threading.Lock()
 
-        self._tts_node = OpenJTalkTTSNode()  # type: ignore[assignment]
+        self._tts_node = OpenJTalkTTSNode()
         self._audio_output = SounddeviceAudioOutput(sample_rate=48000)
+
+        self._text_subject = Subject()
+        self._tts_node.consume_text(self._text_subject)
 
         tapped = self._tts_node.emit_audio().pipe(ops.do_action(self._on_audio_chunk))
         self._audio_output.consume_audio(tapped)
 
+        self.register_disposable(
+            Disposable(self.agent.subscribe(self._on_agent_message))
+        )
+
+    @rpc
+    def stop(self) -> None:
+        if self._text_subject is not None:
+            self._text_subject.on_completed()
+            self._text_subject = None
+        if self._tts_node is not None:
+            self._tts_node.dispose()
+            self._tts_node = None
+        if self._audio_output is not None:
+            self._audio_output.stop()
+            self._audio_output = None
+        super().stop()
+
+    def _on_agent_message(self, msg: BaseMessage) -> None:
+        if not isinstance(msg, AIMessage):
+            return
+        content = msg.content
+        if not isinstance(content, str):
+            return
+        if content.strip() == "":
+            return
+        if self._text_subject is None:
+            return
+
+        log_bench_event("speak_invoke")
+        with self._first_chunk_lock:
+            self._first_chunk_pending = True
+        self._text_subject.on_next(content)
+
     def _on_audio_chunk(self, _chunk: Any) -> None:
-        """Fire first_audio_out exactly once per speak() invocation."""
+        """Fire ``first_audio_out`` exactly once per ``_on_agent_message`` call."""
         with self._first_chunk_lock:
             if not self._first_chunk_pending:
                 return
             self._first_chunk_pending = False
         log_bench_event("first_audio_out", tool="speak")
 
-    @skill
-    def speak(self, text: str, blocking: bool = True) -> str:
-        """Speak text out loud through the robot's speakers.
 
-        USE THIS TOOL AS OFTEN AS NEEDED. People can't normally see what you say in text, but can hear what you speak.
-
-        Try to be as concise as possible. Remember that speaking takes time, so get to the point quickly.
-
-        Example usage:
-
-            speak("こんにちは、ロボットアシスタントです。")
-        """
-        log_bench_event("speak_invoke")
-        with self._first_chunk_lock:
-            self._first_chunk_pending = True
-        return super().speak(text, blocking=blocking)
+__all__ = ["AssistantSpeechNodeJa"]
