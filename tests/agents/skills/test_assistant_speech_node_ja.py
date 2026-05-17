@@ -41,7 +41,10 @@ def node(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 
-    n = AssistantSpeechNodeJa(config_args={})
+    n = AssistantSpeechNodeJa()
+    # subscribe is exercised by integration; here we stub it out to keep the
+    # unit test focused on _on_agent_message / _on_audio_chunk logic.
+    n.agent.subscribe = MagicMock(return_value=lambda: None)
     n.start()
     n._test_fake_tts = fake_tts  # type: ignore[attr-defined]
     n._test_fake_audio = fake_audio  # type: ignore[attr-defined]
