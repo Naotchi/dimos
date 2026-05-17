@@ -183,7 +183,7 @@ _VL_ENDPOINT = os.environ.get("DIMOS_AZURE_VOICE_LIVE_ENDPOINT", "")
 _VL_API_KEY = os.environ.get("DIMOS_AZURE_VOICE_LIVE_API_KEY", "")
 _VL_MODEL = os.environ.get("DIMOS_AZURE_VOICE_LIVE_MODEL", "gpt-realtime")
 _VL_STT_MODEL = os.environ.get("DIMOS_VL_STT_MODEL", "azure-speech")
-_VL_TIMEOUT_S = 30.0
+_VL_TIMEOUT_S = 10.0
 
 
 class VoiceLiveStt:
