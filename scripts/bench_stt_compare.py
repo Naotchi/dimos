@@ -18,6 +18,7 @@ docs/superpowers/specs/2026-05-17-stt-compare-harness-design.md
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import sys
 import threading
@@ -25,6 +26,14 @@ import time
 
 import numpy as np
 import sounddevice as sd  # type: ignore[import-untyped]
+from azure.ai.voicelive.aio import connect as voicelive_connect
+from azure.ai.voicelive.models import (
+    AudioInputTranscriptionOptions,
+    InputAudioFormat,
+    RequestSession,
+    ServerEventType,
+)
+from azure.core.credentials import AzureKeyCredential
 from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 from pynput import keyboard
 from scipy.signal import resample_poly
@@ -151,6 +160,86 @@ class LocalStt:
         return " ".join(seg.text.strip() for seg in segments)
 
 
+_VL_ENDPOINT = os.environ.get("DIMOS_AZURE_VOICE_LIVE_ENDPOINT", "")
+_VL_API_KEY = os.environ.get("DIMOS_AZURE_VOICE_LIVE_API_KEY", "")
+_VL_MODEL = os.environ.get("DIMOS_AZURE_VOICE_LIVE_MODEL", "gpt-realtime")
+_VL_STT_MODEL = os.environ.get("DIMOS_VL_STT_MODEL", "azure-speech")
+
+
+class VoiceLiveStt:
+    """Azure Voice Live transcription-only client.
+
+    Opens one persistent session at startup, reuses it for every turn.
+    Sends PCM via input_audio_buffer.append, commits, then awaits the
+    next conversation.item.input_audio_transcription.completed event.
+    """
+
+    def __init__(self) -> None:
+        if not _VL_ENDPOINT or not _VL_API_KEY:
+            raise RuntimeError(
+                "DIMOS_AZURE_VOICE_LIVE_ENDPOINT / _API_KEY が未設定。"
+                " default.env を読み込んで再実行してください。"
+            )
+        self._conn_cm: object | None = None
+        self._conn: object | None = None
+        self._reader: asyncio.Task[None] | None = None
+        self._transcript_q: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        # tuple = (text, ok)
+
+    async def open(self) -> None:
+        self._conn_cm = voicelive_connect(
+            endpoint=_VL_ENDPOINT,
+            credential=AzureKeyCredential(_VL_API_KEY),
+            model=_VL_MODEL,
+        )
+        self._conn = await self._conn_cm.__aenter__()
+        await self._conn.session.update(
+            session=RequestSession(
+                instructions="",
+                input_audio_format=InputAudioFormat.PCM16,
+                turn_detection=None,  # commit を明示送信する
+                input_audio_transcription=AudioInputTranscriptionOptions(
+                    model=_VL_STT_MODEL, language="ja"
+                ),
+            )
+        )
+        self._reader = asyncio.create_task(self._read_events())
+
+    async def close(self) -> None:
+        if self._reader is not None:
+            self._reader.cancel()
+        if self._conn_cm is not None:
+            await self._conn_cm.__aexit__(None, None, None)
+
+    async def _read_events(self) -> None:
+        assert self._conn is not None
+        try:
+            async for event in self._conn:
+                etype = getattr(event, "type", None)
+                if etype == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_COMPLETED:
+                    transcript = getattr(event, "transcript", "") or ""
+                    await self._transcript_q.put((transcript, True))
+                elif etype == ServerEventType.CONVERSATION_ITEM_INPUT_AUDIO_TRANSCRIPTION_FAILED:
+                    err = getattr(event, "error", None)
+                    await self._transcript_q.put((f"[VL failed: {err}]", False))
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # noqa: BLE001
+            await self._transcript_q.put((f"[VL reader crashed: {exc}]", False))
+
+    async def transcribe(self, pcm: bytes) -> tuple[str, float]:
+        assert self._conn is not None
+        # Drain any stale event before sending.
+        while not self._transcript_q.empty():
+            self._transcript_q.get_nowait()
+        b64 = base64.b64encode(pcm).decode("ascii")
+        t0 = time.perf_counter()
+        await self._conn.input_audio_buffer.append(audio=b64)
+        await self._conn.input_audio_buffer.commit()
+        text, _ok = await self._transcript_q.get()
+        return text, time.perf_counter() - t0
+
+
 async def amain() -> int:
     loop = asyncio.get_running_loop()
     ptt = PttController(loop)
@@ -160,6 +249,9 @@ async def amain() -> int:
     print("(loading whisper model...)", flush=True)
     local = LocalStt()
     local.warmup()
+    print("(opening Voice Live session...)", flush=True)
+    vl = VoiceLiveStt()
+    await vl.open()
     print("[SPACE] 録音 / [q] 終了", flush=True)
     turn = 0
     try:
@@ -179,9 +271,14 @@ async def amain() -> int:
             pcm = mic.end()
             seconds = len(pcm) / 2 / SAMPLE_RATE
             print(f"(captured {seconds:.2f}s)", flush=True)
-            local_text, local_ms = await local.transcribe(pcm)
+            (local_text, local_ms), (vl_text, vl_ms) = await asyncio.gather(
+                local.transcribe(pcm),
+                vl.transcribe(pcm),
+            )
             print(f"Local Whisper : {local_text}  ({local_ms:.2f}s)", flush=True)
+            print(f"Voice Live    : {vl_text}  ({vl_ms:.2f}s)", flush=True)
     finally:
+        await vl.close()
         mic.stop()
         ptt.stop()
     return 0
