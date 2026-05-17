@@ -37,6 +37,9 @@ from dimos.core.module import Module
 from dimos.core.stream import In
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 
 class AssistantSpeechNodeJa(Module):
@@ -90,6 +93,9 @@ class AssistantSpeechNodeJa(Module):
         if content.strip() == "":
             return
         if self._text_subject is None:
+            logger.warning(
+                "AssistantSpeechNodeJa received agent message after stop(); dropping."
+            )
             return
 
         log_bench_event("speak_invoke")
