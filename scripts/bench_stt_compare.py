@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import difflib
 import os
 import sys
 import threading
@@ -240,6 +241,34 @@ class VoiceLiveStt:
         return text, time.perf_counter() - t0
 
 
+_ANSI_RED = "\x1b[31m"
+_ANSI_GREEN = "\x1b[32m"
+_ANSI_RESET = "\x1b[0m"
+
+
+def _highlight_diff(local_text: str, vl_text: str) -> tuple[str, str]:
+    """Return (local_decorated, vl_decorated) with diff chars colored.
+
+    Characters present only in local are red, only in VL are green,
+    common characters left plain. Uses ndiff for character-level diff.
+    """
+    matcher = difflib.SequenceMatcher(a=local_text, b=vl_text)
+    local_out: list[str] = []
+    vl_out: list[str] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        l_chunk = local_text[i1:i2]
+        v_chunk = vl_text[j1:j2]
+        if tag == "equal":
+            local_out.append(l_chunk)
+            vl_out.append(v_chunk)
+        else:
+            if l_chunk:
+                local_out.append(f"{_ANSI_RED}{l_chunk}{_ANSI_RESET}")
+            if v_chunk:
+                vl_out.append(f"{_ANSI_GREEN}{v_chunk}{_ANSI_RESET}")
+    return "".join(local_out), "".join(vl_out)
+
+
 async def amain() -> int:
     loop = asyncio.get_running_loop()
     ptt = PttController(loop)
@@ -275,8 +304,13 @@ async def amain() -> int:
                 local.transcribe(pcm),
                 vl.transcribe(pcm),
             )
-            print(f"Local Whisper : {local_text}  ({local_ms:.2f}s)", flush=True)
-            print(f"Voice Live    : {vl_text}  ({vl_ms:.2f}s)", flush=True)
+            if local_text == vl_text:
+                print(f"match         : {local_text}", flush=True)
+                print(f"              : local {local_ms:.2f}s / vl {vl_ms:.2f}s", flush=True)
+            else:
+                local_hl, vl_hl = _highlight_diff(local_text, vl_text)
+                print(f"Local Whisper : {local_hl}  ({local_ms:.2f}s)", flush=True)
+                print(f"Voice Live    : {vl_hl}  ({vl_ms:.2f}s)", flush=True)
     finally:
         await vl.close()
         mic.stop()
