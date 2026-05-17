@@ -9,10 +9,27 @@
 
 """STT accuracy compare harness.
 
-Record one PTT utterance, send the same buffer to both local
-faster-whisper and Azure Voice Live (transcription-only), and print
-both transcripts side by side. Design:
-docs/superpowers/specs/2026-05-17-stt-compare-harness-design.md
+Manual-only tool to A/B-compare local faster-whisper vs Azure Voice Live
+STT on the same microphone capture, used to decide whether the voice_live
+blueprint should be retained for STT accuracy.
+
+Usage:
+    # default.env を source 済みで .venv が active な状態で
+    python scripts/bench_stt_compare.py
+
+Controls:
+    SPACE (hold) : record while held
+    SPACE (release) : stop recording, transcribe via both engines
+    q : quit
+
+Environment:
+    DIMOS_AZURE_VOICE_LIVE_ENDPOINT  (required)
+    DIMOS_AZURE_VOICE_LIVE_API_KEY   (required)
+    DIMOS_AZURE_VOICE_LIVE_MODEL     (optional, default 'gpt-realtime')
+    DIMOS_WHISPER_MODEL              (optional, default 'large-v3')
+    DIMOS_VL_STT_MODEL               (optional, default 'azure-speech')
+
+Design: docs/superpowers/specs/2026-05-17-stt-compare-harness-design.md
 """
 
 from __future__ import annotations
