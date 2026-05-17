@@ -182,6 +182,7 @@ _VL_ENDPOINT = os.environ.get("DIMOS_AZURE_VOICE_LIVE_ENDPOINT", "")
 _VL_API_KEY = os.environ.get("DIMOS_AZURE_VOICE_LIVE_API_KEY", "")
 _VL_MODEL = os.environ.get("DIMOS_AZURE_VOICE_LIVE_MODEL", "gpt-realtime")
 _VL_STT_MODEL = os.environ.get("DIMOS_VL_STT_MODEL", "azure-speech")
+_VL_TIMEOUT_S = 30.0
 
 
 class VoiceLiveStt:
@@ -254,7 +255,12 @@ class VoiceLiveStt:
         t0 = time.perf_counter()
         await self._conn.input_audio_buffer.append(audio=b64)
         await self._conn.input_audio_buffer.commit()
-        text, _ok = await self._transcript_q.get()
+        try:
+            text, _ok = await asyncio.wait_for(
+                self._transcript_q.get(), timeout=_VL_TIMEOUT_S
+            )
+        except asyncio.TimeoutError:
+            return f"[VL timeout after {_VL_TIMEOUT_S:.0f}s]", time.perf_counter() - t0
         return text, time.perf_counter() - t0
 
 
