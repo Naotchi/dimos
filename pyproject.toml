@@ -59,6 +59,7 @@ dependencies = [
     "sortedcontainers==2.4.0",
     "pydantic",
     "python-dotenv",
+    "pynput>=1.7,<2",
     "typing_extensions>=4.0; python_version < '3.11'",
     "annotation-protocol>=1.4.0",
     "lazy_loader",
