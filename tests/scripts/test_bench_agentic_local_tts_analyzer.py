@@ -215,3 +215,78 @@ def test_mode_auto_detection_by_dir_name(tmp_path: Path) -> None:
     from bench_agentic_local_tts import detect_mode
     assert detect_mode(tmp_path / "2026-05-16-bench-agentic-local-tts") == "agentic-local-tts"
     assert detect_mode(tmp_path / "2026-05-16-bench-agentic-voice-live") == "voice-live"
+
+
+def test_ttft_and_per_step_and_tokens(tmp_path):
+    """A two-step LLM turn with token usage and llm_first_token events."""
+    path = tmp_path / "main.jsonl"
+    lines = [
+        _line({"event_kind": "user_audio_end", "turn_id": "T", "t": 0.0,
+               "fixture_id": "fx", "run_idx": 0, "warmup": False,
+               "audio_seconds": 1.0}),
+        _line({"event_kind": "stt_done",        "turn_id": "T", "duration_s": 0.40, "t": 0.40}),
+        _line({"event_kind": "llm_first_token", "turn_id": "T", "t": 0.55, "step_idx": 0}),
+        _line({"event_kind": "llm_step",        "turn_id": "T", "t": 0.80,
+               "node": "agent", "duration_s": 0.40, "step_idx": 0, "n_messages": 1,
+               "input_tokens": 120, "output_tokens": 17}),
+        _line({"event_kind": "tools_step",      "turn_id": "T", "t": 0.90,
+               "node": "tools", "duration_s": 0.10, "step_idx": 1, "n_messages": 1}),
+        _line({"event_kind": "llm_first_token", "turn_id": "T", "t": 1.00, "step_idx": 1}),
+        _line({"event_kind": "llm_step",        "turn_id": "T", "t": 1.20,
+               "node": "agent", "duration_s": 0.30, "step_idx": 2, "n_messages": 1,
+               "input_tokens": 200, "output_tokens": 9}),
+        _line({"event_kind": "turn_done",       "turn_id": "T", "duration_s": 1.20}),
+    ]
+    path.write_text("".join(lines))
+
+    turns = build_turns(path)
+    m = compute_per_turn_metrics(turns)["T"]
+
+    # ttft_s = first llm_first_token.t - user_audio_end.t - stt_s
+    #        = 0.55 - 0.0 - 0.40 = 0.15
+    assert abs(m["ttft_s"] - 0.15) < 1e-6
+    assert abs(m["llm_step_0_s"]   - 0.40) < 1e-6
+    assert abs(m["llm_step_last_s"] - 0.30) < 1e-6
+    assert m["prompt_tokens"]     == 320
+    assert m["completion_tokens"] == 26
+
+
+def test_run_meta_is_parsed(tmp_path):
+    path = tmp_path / "main.jsonl"
+    from bench_agentic_local_tts import read_run_meta
+    path.write_text(
+        json.dumps({"event_kind": "run_meta",
+                    "label": "azure-gpt-4o",
+                    "model": "gpt-4o",
+                    "base_url": "https://x.openai.azure.com/openai/v1"}) + "\n"
+    )
+    meta = read_run_meta(path)
+    assert meta["label"]    == "azure-gpt-4o"
+    assert meta["model"]    == "gpt-4o"
+    assert meta["base_url"] == "https://x.openai.azure.com/openai/v1"
+
+
+def test_run_meta_returns_empty_dict_when_missing(tmp_path):
+    path = tmp_path / "main.jsonl"
+    path.write_text("")
+    from bench_agentic_local_tts import read_run_meta
+    assert read_run_meta(path) == {}
+
+
+def test_ttft_none_when_no_first_token_event(tmp_path):
+    path = tmp_path / "main.jsonl"
+    path.write_text("".join([
+        json.dumps({"event_kind": "user_audio_end", "turn_id": "T", "t": 0.0,
+                    "fixture_id": "fx", "run_idx": 0, "warmup": False,
+                    "audio_seconds": 1.0}) + "\n",
+        json.dumps({"event_kind": "stt_done", "turn_id": "T", "duration_s": 0.4, "t": 0.4}) + "\n",
+        json.dumps({"event_kind": "llm_step", "turn_id": "T", "t": 0.8,
+                    "node": "agent", "duration_s": 0.4, "step_idx": 0, "n_messages": 1,
+                    "input_tokens": None, "output_tokens": None}) + "\n",
+        json.dumps({"event_kind": "turn_done", "turn_id": "T", "duration_s": 0.8}) + "\n",
+    ]))
+    turns = build_turns(path)
+    m = compute_per_turn_metrics(turns)["T"]
+    assert m["ttft_s"] is None
+    assert m["prompt_tokens"] is None
+    assert m["completion_tokens"] is None

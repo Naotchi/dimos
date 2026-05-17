@@ -74,6 +74,7 @@ def build_turns(jsonl_path: Path) -> dict[str, dict[str, Any]]:
             "tools_steps": [],
             "mcp_tools": [],
             "speak_invokes": [],
+            "llm_first_tokens": [],
         }
     )
 
@@ -106,6 +107,8 @@ def build_turns(jsonl_path: Path) -> dict[str, dict[str, Any]]:
             turns[current].setdefault("first_tool_call", row)
         elif kind == "speak_invoke":
             turns[current]["speak_invokes"].append(row)
+        elif kind == "llm_first_token":
+            turns[current]["llm_first_tokens"].append(row)
         elif kind == "first_audio_out":
             turns[current].setdefault("first_audio_out", row)
         elif kind == "turn_done":
@@ -161,8 +164,34 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
         if speak_invokes and fao is not None:
             speak_tts_s = _delta(fao, speak_invokes[0].get("t"))
 
+        llm_steps = data.get("llm_steps", [])
+        first_tokens = data.get("llm_first_tokens", [])
+        stt_s = _parse_duration(stt.get("duration_s")) if stt else None
+
+        ttft_s: float | None = None
+        if first_tokens and t0 is not None and stt_s is not None:
+            ttft_s = first_tokens[0].get("t", 0.0) - t0 - stt_s
+
+        llm_step_0_s = (
+            _parse_duration(llm_steps[0].get("duration_s")) if llm_steps else None
+        )
+        llm_step_last_s = (
+            _parse_duration(llm_steps[-1].get("duration_s")) if llm_steps else None
+        )
+
+        prompt_tokens_vals = [s.get("input_tokens") for s in llm_steps]
+        completion_tokens_vals = [s.get("output_tokens") for s in llm_steps]
+        prompt_tokens = (
+            sum(v for v in prompt_tokens_vals if v is not None)
+            if any(v is not None for v in prompt_tokens_vals) else None
+        )
+        completion_tokens = (
+            sum(v for v in completion_tokens_vals if v is not None)
+            if any(v is not None for v in completion_tokens_vals) else None
+        )
+
         llm_durations = [
-            _parse_duration(s.get("duration_s")) or 0.0 for s in data.get("llm_steps", [])
+            _parse_duration(s.get("duration_s")) or 0.0 for s in llm_steps
         ]
         tools_durations = [
             _parse_duration(s.get("duration_s")) or 0.0 for s in data.get("tools_steps", [])
@@ -176,8 +205,13 @@ def compute_per_turn_metrics(turns: dict[str, dict[str, Any]]) -> dict[str, dict
             "speak_tts_s": speak_tts_s,
             "e2e_first_audio_s": _delta(fao, t0),
             "first_tool_call_s": _delta(ftc, t0),
-            "stt_s": _parse_duration(stt.get("duration_s")) if stt else None,
+            "stt_s": stt_s,
+            "ttft_s": ttft_s,
+            "llm_step_0_s": llm_step_0_s,
+            "llm_step_last_s": llm_step_last_s,
             "llm_total_s": sum(llm_durations) if llm_durations else None,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
             "tools_total_s": sum(tools_durations) if tools_durations else None,
             "turn_total_s": _parse_duration(td.get("duration_s")) if td else None,
             "n_mcp_tools": len(data.get("mcp_tools", [])),
@@ -216,7 +250,12 @@ _AGENTIC_LOCAL_TTS_METRIC_KEYS = (
     "agent_first_call_s",
     "speak_tts_s",
     "stt_s",
+    "ttft_s",
+    "llm_step_0_s",
+    "llm_step_last_s",
     "llm_total_s",
+    "prompt_tokens",
+    "completion_tokens",
     "tools_total_s",
     "turn_total_s",
 )
@@ -253,6 +292,23 @@ def aggregate(metrics: dict[str, dict[str, Any]], mode: str = "agentic-local-tts
         "n_turns": len(live),
         "metrics": {k: _summarize([m.get(k) for m in live]) for k in keys},
     }
+
+
+def read_run_meta(jsonl_path: Path) -> dict[str, Any]:
+    """Find the first run_meta event in main.jsonl, return its payload (envelope stripped).
+
+    Returns an empty dict if no run_meta event is present (older runs).
+    """
+    if not jsonl_path.exists():
+        return {}
+    for row in _read_jsonl(jsonl_path):
+        if row.get("event_kind") == "run_meta":
+            payload = {k: v for k, v in row.items()
+                       if k not in ("event_kind", "turn_id", "t",
+                                    "event", "level", "logger", "timestamp",
+                                    "func_name", "lineno")}
+            return payload
+    return {}
 
 
 def _pick_run(arg: str | None) -> Path:
@@ -293,6 +349,11 @@ def main(argv: list[str]) -> int:
         sys.exit(f"missing {jsonl}")
 
     mode = args.config if args.config != "auto" else detect_mode(run_dir)
+
+    meta = read_run_meta(jsonl)
+    if meta:
+        print(f"label: {meta.get('label', '?')}  model: {meta.get('model', '?')}  "
+              f"base_url: {meta.get('base_url', '?')}")
 
     turns = build_turns(jsonl)
     metrics = compute_per_turn_metrics(turns)
