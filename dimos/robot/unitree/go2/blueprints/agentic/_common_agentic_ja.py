@@ -13,12 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Japanese common agentic skill set: mirrors _common_agentic with JA TTS/STT."""
+"""Japanese common agentic skill set: mirrors _common_agentic with JA TTS/STT.
 
+Human input is a local mic gated by a PTT hotkey (default F9) rather than
+the WebUI mic, so the WebUI is no longer part of this bundle. See
+LocalMicrophoneJa (PTT-driven utterance recorder) and WhisperHumanInputJa
+(STT → /human_input bridge) — autoconnect wires them via the shared
+``mic_gate`` and ``mic_utterance`` port names.
+"""
+
+from dimos.agents.local_microphone_ja import LocalMicrophoneJa
+from dimos.agents.realtime.ptt_keyboard import PttKeyboard
 from dimos.agents.skills.navigation import NavigationSkillContainer
 from dimos.agents.skills.person_follow import PersonFollowSkillContainer
 from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
-from dimos.agents.web_human_input_ja import JapaneseWebInput
+from dimos.agents.whisper_human_input_ja import WhisperHumanInputJa
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.robot.unitree.go2.connection import GO2Connection
 from dimos.robot.unitree.unitree_skill_container import UnitreeSkillContainer
@@ -27,7 +36,9 @@ _common_agentic_ja = autoconnect(
     NavigationSkillContainer.blueprint(),
     PersonFollowSkillContainer.blueprint(camera_info=GO2Connection.camera_info_static),
     UnitreeSkillContainer.blueprint(),
-    JapaneseWebInput.blueprint(),
+    LocalMicrophoneJa.blueprint(),
+    WhisperHumanInputJa.blueprint(),
+    PttKeyboard.blueprint(),
     AssistantSpeechNodeJa.blueprint(),
 )
 
