@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -56,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--turn-timeout", type=float, default=30.0)
     p.add_argument("--initial-idle-timeout", type=float, default=60.0)
+    p.add_argument(
+        "--label",
+        default=None,
+        help="Free-form label for this run (recorded in main.jsonl run_meta event). "
+             "Defaults to DIMOS_LLM_MODEL.",
+    )
     p.add_argument(
         "--out",
         default=None,
@@ -137,6 +144,22 @@ def main() -> int:
     if args.simulation:
         global_config.update(simulation=True)
     out_dir = configure_log_dir(args.out)
+    label = args.label or os.environ.get("DIMOS_LLM_MODEL") or "unlabeled"
+    log_bench_event(
+        "run_meta",
+        label=label,
+        model=os.environ.get("DIMOS_LLM_MODEL"),
+        base_url=(
+            os.environ.get("DIMOS_LLM_BASE_URL")
+            or os.environ.get("OPENAI_BASE_URL")
+        ),
+        api_key_source=(
+            "DIMOS_LLM_API_KEY"
+            if os.environ.get("DIMOS_LLM_API_KEY")
+            else ("OPENAI_API_KEY" if os.environ.get("OPENAI_API_KEY") else None)
+        ),
+        started_at=datetime.now().isoformat(),
+    )
     print(
         f"[replay] logging to {out_dir} (connection={global_config.unitree_connection_type})",
         flush=True,
