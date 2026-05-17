@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 
+import numpy as np
+import sounddevice as sd  # type: ignore[import-untyped]
 from pynput import keyboard
 
 
@@ -63,15 +66,62 @@ class PttController:
             self._set(self.space_up)
 
 
+class MicCapture:
+    """Buffer 16-bit mono PCM into a bytearray between PTT down/up.
+
+    Lifetime: open one InputStream up front (avoiding device open/close
+    latency every turn), gate writes via `_recording` flag.
+    """
+
+    def __init__(self, sample_rate: int = SAMPLE_RATE) -> None:
+        self._sample_rate = sample_rate
+        self._buf = bytearray()
+        self._recording = False
+        self._lock = threading.Lock()
+        self._stream = sd.InputStream(
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16",
+            blocksize=int(sample_rate * 0.02),  # 20ms
+            callback=self._callback,
+        )
+
+    def start(self) -> None:
+        self._stream.start()
+
+    def stop(self) -> None:
+        self._stream.stop()
+        self._stream.close()
+
+    def begin(self) -> None:
+        with self._lock:
+            self._buf = bytearray()
+            self._recording = True
+
+    def end(self) -> bytes:
+        with self._lock:
+            self._recording = False
+            return bytes(self._buf)
+
+    def _callback(
+        self, indata: np.ndarray, frames: int, _t: object, _s: object
+    ) -> None:
+        with self._lock:
+            if self._recording:
+                self._buf.extend(indata.tobytes())
+
+
 async def amain() -> int:
     loop = asyncio.get_running_loop()
     ptt = PttController(loop)
     ptt.start()
+    mic = MicCapture()
+    mic.start()
     print("[SPACE] 録音 / [q] 終了", flush=True)
     turn = 0
     try:
         while not ptt.quit.is_set():
-            done, _ = await asyncio.wait(
+            await asyncio.wait(
                 [asyncio.create_task(ptt.space_down.wait()),
                  asyncio.create_task(ptt.quit.wait())],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -81,9 +131,13 @@ async def amain() -> int:
             turn += 1
             print(f"\n─── turn {turn} ───────────────────────────────", flush=True)
             print("(recording... release SPACE to stop)", flush=True)
+            mic.begin()
             await ptt.space_up.wait()
-            print("(stub: would now transcribe)", flush=True)
+            pcm = mic.end()
+            seconds = len(pcm) / 2 / SAMPLE_RATE
+            print(f"(captured {len(pcm)} bytes = {seconds:.2f}s)", flush=True)
     finally:
+        mic.stop()
         ptt.stop()
     return 0
 
