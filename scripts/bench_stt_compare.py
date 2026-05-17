@@ -26,7 +26,8 @@ Environment:
     DIMOS_AZURE_VOICE_LIVE_ENDPOINT  (required)
     DIMOS_AZURE_VOICE_LIVE_API_KEY   (required)
     DIMOS_AZURE_VOICE_LIVE_MODEL     (optional, default 'gpt-realtime')
-    DIMOS_WHISPER_MODEL              (optional, default 'large-v3')
+    DIMOS_WHISPER_MODEL              (optional, default 'base' — matches
+                                      unitree-go2-agentic-local-tts blueprint)
     DIMOS_VL_STT_MODEL               (optional, default 'azure-speech')
 
 Design: docs/superpowers/specs/2026-05-17-stt-compare-harness-design.md
@@ -143,7 +144,7 @@ class MicCapture:
 
 
 _WHISPER_SAMPLE_RATE = 16_000
-_DEFAULT_WHISPER_MODEL = os.environ.get("DIMOS_WHISPER_MODEL", "large-v3")
+_DEFAULT_WHISPER_MODEL = os.environ.get("DIMOS_WHISPER_MODEL", "base")
 
 
 def _pcm24k_to_float16k(pcm: bytes) -> np.ndarray:
