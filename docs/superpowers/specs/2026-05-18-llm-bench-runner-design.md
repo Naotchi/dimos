@@ -185,7 +185,7 @@ coordinator.stop()
 - bench スクリプト smoke test: 既存 fixtures + 最小 config（runs=1 warmup=0、模擬 LLM endpoint）で 1 周回ることを確認する CI 用テストを 1 本追加。
   - 既存テストの構成が分からない場合は実装計画フェーズで確認。
 
-## Open Questions
+## Open Questions / Decisions
 
-1. MuJoCo viewer 抑制が `MUJOCO_GL=egl` だけで足りるか、それとも simulation backend 側に明示的な viewer flag があるか。実装計画フェーズで `dimos/simulation` 配下のコードを調査して確定する。
-2. `system_prompt` の `ja_default` / `minimal` のスイッチは新規実装か、既存に該当する名前付きプロンプトがあるか。
+1. **MuJoCo viewer 抑制（解決）:** GO2 の sim path は `dimos/robot/unitree/mujoco_connection.py` → `dimos/simulation/mujoco/mujoco_process.py:111` で `viewer.launch_passive(...)` を直接呼ぶため、コードで viewer を止めるには upstream 編集が要る。これは CLAUDE.md の「upstream には最小差分」ルールに反する。対応として **bench は `xvfb-run -a` 経由で実行**することにし、`MUJOCO_GL=egl` を bench スクリプトでセットして off-screen rendering を有効化する。bench runner は `simulation.headless=true` かつ `DISPLAY` 未設定のとき警告を出す。
+2. **`system_prompt` 名前付きスイッチ:** 当面 `ja_default` のみサポート。`minimal` 等は YAGNI として後回し。config に `ja_default` 以外が渡ったら bench runner が `NotImplementedError` で fail-fast する。
