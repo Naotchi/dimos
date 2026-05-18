@@ -34,7 +34,7 @@ ModuleCoordinator.build(
     blueprint_args={
         "WhisperHumanInputJa":   {"model": "small", "fp16": True},
         "TimedMcpClient":        {"model": "gpt-4o-mini"},
-        "AssistantSpeechNodeJa": {"impl": "openai", "voice": "alloy"},
+        "AssistantSpeechNodeJa": {"impl": "openai", "openai_voice": "alloy"},
         "g":                     {"simulation": True},  # global_config
     },
 )
@@ -50,8 +50,8 @@ ModuleCoordinator.build(
 
 そこで `AssistantSpeechNodeJa` を「内部で impl を選択する wrapper」に改修する:
 
-- config に `impl: "open_jtalk" | "openai" | "pytts"`（default は現状の OpenJTalk）
-- impl ごとの追加 param（voice, speed 等）も同 config に
+- config に `impl: "open_jtalk" | "openai"`（default は OpenJTalk。`pytts` 等は YAGNI として未実装）
+- impl ごとの追加 param（`openai_voice`, `openai_model` 等）も同 config に
 - blueprint 構造は変わらない、`blueprint_args["AssistantSpeechNodeJa"]` で切替
 
 このファイルは fork-local（`speak_skill_ja.py`）なので、CLAUDE.md の編集ルールに抵触しない。
@@ -92,8 +92,10 @@ llm:
 
 tts:
   # AssistantSpeechNodeJa に渡る（改修後）
-  impl: open_jtalk                     # open_jtalk / openai / pytts
-  # 以下は impl 依存。openai なら voice/model、open_jtalk なら voice_dir/speed など
+  impl: open_jtalk                     # open_jtalk / openai
+  # impl=openai のときの追加 params:
+  # openai_voice: echo                 # alloy/echo/fable/onyx/nova/shimmer
+  # openai_model: tts-1
 ```
 
 `bench_configs/` ディレクトリを `scripts/bench_configs/` 配下に置く（fork-local）。
@@ -119,7 +121,7 @@ logs/{YYYY-MM-DD-HHMMSS}-{config.name}/
   "ts": "...",
   "config_name": "whisper-base-gpt4o-openjtalk",
   "config_hash": "ab12cd34",            // config dict の正規化 JSON の sha256 先頭 8 文字
-  "config": { ...full config dict... }, // 安全な範囲で全部埋め込む。api_key は値ではなく env 変数名のみ
+  "config": { ...full config dict... }, // 全文埋め込み。API key は config に持たず env (OPENAI_API_KEY) から直接読むので payload に漏れない
   "started_at": "..."
 }
 ```

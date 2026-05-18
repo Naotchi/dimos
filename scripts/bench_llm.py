@@ -145,11 +145,14 @@ def main() -> int:
     cfg_path = Path(args.config)
     cfg = load_config(cfg_path)
 
+    # Validate config (build args) before touching env or filesystem so that a
+    # bad config exits cleanly without leaving a half-formed run dir behind.
+    bp_args = build_blueprint_args(cfg)
+
     os.environ.setdefault("MUJOCO_GL", "egl")
     warn_if_no_display_for_sim(cfg)
 
     out_dir = setup_run_dir(cfg, cfg_path)
-    bp_args = build_blueprint_args(cfg)
 
     print(f"[bench] {cfg['name']} → {out_dir}", flush=True)
 
