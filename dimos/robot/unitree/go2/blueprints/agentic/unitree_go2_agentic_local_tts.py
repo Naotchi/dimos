@@ -20,18 +20,21 @@ Differences from sibling blueprints:
 - ``unitree-go2-agentic`` (original, English):
     STT=local Whisper, LLM=cloud, **TTS=cloud**.
 - ``unitree-go2-agentic-local-tts`` (this one, Japanese):
-    STT=local ja-tuned Whisper, LLM=cloud (``DIMOS_LLM_MODEL``, default
-    ``gpt-4o``), **TTS=local pyopenjtalk**, ja system prompt.
+    STT=local ja-tuned Whisper, LLM=swappable via ``DIMOS_LLM_MODEL`` /
+    ``DIMOS_LLM_BASE_URL`` / ``DIMOS_LLM_API_KEY`` (any OpenAI-compatible
+    endpoint: Azure v1, OpenAI cloud, local vLLM/Ollama on DGX Spark, ...;
+    default ``gpt-4o`` on OpenAI), **TTS=local Style-Bert-VITS2**, ja
+    system prompt.
 - ``unitree-go2-agentic-voice-live`` (Japanese):
     Azure Voice Live realtime end-to-end (STT+LLM+TTS cloud).
 
 The defining axis vs the other two is **local TTS** — Japanese (via
-pyopenjtalk) is implied by the locality choice. Upstream files are not
-modified; all fork-specific wiring is in ``*_ja`` helpers.
+Style-Bert-VITS2, a neural VITS-based engine) is implied by the locality
+choice. Upstream files are not modified; all fork-specific wiring is in
+``*_ja`` helpers.
 """
 
-import os
-
+from dimos.agents.llm_env_ja import resolve_llm_model
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.agents.mcp.mcp_server import McpServer
 from dimos.agents.system_prompt_ja import SYSTEM_PROMPT_JA
@@ -42,7 +45,9 @@ from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial_bounded import
     unitree_go2_spatial_bounded,
 )
 
-_LLM_MODEL = os.environ.get("DIMOS_LLM_MODEL", "gpt-4o")
+# LLM endpoint switching: DIMOS_LLM_MODEL / DIMOS_LLM_BASE_URL / DIMOS_LLM_API_KEY.
+# See dimos/agents/llm_env_ja.py for the full env contract.
+_LLM_MODEL = resolve_llm_model()
 
 # SecurityModule は spatial_bounded に含まれるが SpeakSkillSpec satisfier を
 # 必要とする。local-tts では LLM 応答テキストを直接 TTS に流す方針なので、

@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Speak assistant messages directly via local Japanese TTS.
+"""Speak assistant messages directly via Japanese TTS.
 
 Subscribes to ``McpClient.agent: Out[BaseMessage]`` (autoconnect wires by
 ``(name, type)``) and feeds the text content of each ``AIMessage`` into a
-TTS node selected by ``impl`` (default ``open_jtalk``). Output goes to
-``SounddeviceAudioOutput``.
+TTS node selected by ``impl`` (default ``sbv2``). The audio sink is opened
+at the node's native sample rate so the speak path never resamples.
 """
 
 from __future__ import annotations
@@ -42,11 +42,19 @@ from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
+# Static sample rates for nodes that don't expose `self.sample_rate`.
+# OpenJTalk's module-level SAMPLE_RATE constant is 48000; OpenAI TTS
+# returns 24 kHz audio (see node_openai.py's __main__ example).
+_STATIC_SAMPLE_RATE: dict[str, int] = {
+    "open_jtalk": 48000,
+    "openai": 24000,
+}
+
 
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
-    impl: Literal["open_jtalk", "openai"] = "open_jtalk"
+    impl: Literal["open_jtalk", "sbv2", "voicevox", "openai"] = "sbv2"
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
 
@@ -58,6 +66,11 @@ class AssistantSpeechNodeJa(Module):
     config: AssistantSpeechNodeJaConfig
 
     def _make_tts_node(self):
+        """Construct the TTS node for this run's impl.
+
+        Heavy backends (sbv2/voicevox) are imported lazily so a run that
+        only targets open_jtalk/openai doesn't pay their import cost.
+        """
         impl = self.config.impl
         if impl == "open_jtalk":
             return OpenJTalkTTSNode()
@@ -66,7 +79,26 @@ class AssistantSpeechNodeJa(Module):
                 voice=self.config.openai_voice,
                 model=self.config.openai_model,
             )
+        if impl == "sbv2":
+            from dimos.stream.audio.tts.node_style_bert_vits2 import (
+                StyleBertVits2TTSNode,
+            )
+            return StyleBertVits2TTSNode()
+        if impl == "voicevox":
+            from dimos.stream.audio.tts.node_voicevox import VoicevoxTTSNode
+            return VoicevoxTTSNode()
         raise ValueError(f"Unknown AssistantSpeechNodeJa impl: {impl!r}")
+
+    def _sample_rate_for(self, node: Any) -> int:
+        """Resolve the playback sample rate for ``node``.
+
+        sbv2/voicevox set ``self.sample_rate``; open_jtalk/openai don't,
+        so fall back to a static per-impl rate.
+        """
+        sr = getattr(node, "sample_rate", None)
+        if sr is not None:
+            return int(sr)
+        return _STATIC_SAMPLE_RATE[self.config.impl]
 
     @rpc
     def start(self) -> None:
@@ -76,7 +108,9 @@ class AssistantSpeechNodeJa(Module):
         self._first_chunk_lock = threading.Lock()
 
         self._tts_node = self._make_tts_node()
-        self._audio_output = SounddeviceAudioOutput(sample_rate=48000)
+        self._audio_output = SounddeviceAudioOutput(
+            sample_rate=self._sample_rate_for(self._tts_node)
+        )
 
         self._text_subject = Subject()
         self._tts_node.consume_text(self._text_subject)

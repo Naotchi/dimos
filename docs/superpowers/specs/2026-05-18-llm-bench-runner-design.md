@@ -46,13 +46,13 @@ ModuleCoordinator.build(
 
 ### TTS impl 切替のために `AssistantSpeechNodeJa` を改修
 
-現状 `AssistantSpeechNodeJa` は OpenJTalk hardcoded。`blueprint_args` は同一クラスの config 上書きしかできず、別クラス（`node_openai`, `node_pytts`）への差し替えはできない。
+`AssistantSpeechNodeJa` は元々 OpenJTalk hardcoded、その後 main で env var (`DIMOS_TTS_BACKEND`) による sbv2/voicevox 切替に置き換わった。bench では複数 backend を YAML から自己記述的に切り替えたいので、env var をやめて config field 経由の切替に統一する:
 
-そこで `AssistantSpeechNodeJa` を「内部で impl を選択する wrapper」に改修する:
-
-- config に `impl: "open_jtalk" | "openai"`（default は OpenJTalk。`pytts` 等は YAGNI として未実装）
+- config に `impl: "open_jtalk" | "sbv2" | "voicevox" | "openai"`（default は `sbv2`、prod と同じ）
 - impl ごとの追加 param（`openai_voice`, `openai_model` 等）も同 config に
+- 重い backend（sbv2 / voicevox）は `_make_tts_node` の中で遅延 import し、未使用時は import コストを払わない
 - blueprint 構造は変わらない、`blueprint_args["AssistantSpeechNodeJa"]` で切替
+- `DIMOS_TTS_BACKEND` env var は廃止
 
 このファイルは fork-local（`speak_skill_ja.py`）なので、CLAUDE.md の編集ルールに抵触しない。
 
@@ -92,7 +92,7 @@ llm:
 
 tts:
   # AssistantSpeechNodeJa に渡る（改修後）
-  impl: open_jtalk                     # open_jtalk / openai
+  impl: sbv2                           # open_jtalk / sbv2 / voicevox / openai
   # impl=openai のときの追加 params:
   # openai_voice: echo                 # alloy/echo/fable/onyx/nova/shimmer
   # openai_model: tts-1
@@ -144,10 +144,12 @@ logs/{YYYY-MM-DD-HHMMSS}-{config.name}/
 
 ### `scripts/bench_configs/*.yaml` (新規)
 
-- 評価対象ごとに 1 ファイル。例:
-  - `whisper-base-gpt4o-openjtalk.yaml` (baseline)
-  - `whisper-small-gpt4o-openai-tts.yaml`
-  - `whisper-base-gpt4o-mini-openjtalk.yaml`
+- 評価対象ごとに 1 ファイル。実装済み例:
+  - `whisper-base-gpt4o-openjtalk.yaml`
+  - `whisper-base-gpt4o-sbv2.yaml`
+  - `whisper-base-gpt4o-voicevox.yaml`
+  - `whisper-base-gpt4o-openai-tts.yaml`
+  - `whisper-small-gpt4o-openjtalk.yaml` (STT サイズ違い)
 - `name` フィールドが run dir 名になる。
 
 ### `dimos/agents/bench_ja/__init__.py` 周辺 (微修正)
