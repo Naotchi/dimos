@@ -352,8 +352,14 @@ def main(argv: list[str]) -> int:
 
     meta = read_run_meta(jsonl)
     if meta:
-        print(f"label: {meta.get('label', '?')}  model: {meta.get('model', '?')}  "
-              f"base_url: {meta.get('base_url', '?')}")
+        # Prefer new keys (config_name + embedded config dict). Fall back to
+        # legacy flat keys (label / model / base_url) for older bench runs.
+        cfg = meta.get("config") or {}
+        llm_cfg = cfg.get("llm") or {}
+        name = meta.get("config_name") or meta.get("label") or "?"
+        model = llm_cfg.get("model") or meta.get("model") or "?"
+        base_url = llm_cfg.get("base_url") or meta.get("base_url") or "?"
+        print(f"config: {name}  model: {model}  base_url: {base_url}")
 
     turns = build_turns(jsonl)
     metrics = compute_per_turn_metrics(turns)

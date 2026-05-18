@@ -88,7 +88,6 @@ llm:
   # TimedMcpClient に渡る
   model: gpt-4o
   base_url: null                       # null なら env (DIMOS_LLM_BASE_URL / OPENAI_BASE_URL)
-  api_key_env: OPENAI_API_KEY          # 参照する env 変数名（実体は env から読む）
   system_prompt: ja_default            # ja_default / minimal / <ファイルパス>
 
 tts:
