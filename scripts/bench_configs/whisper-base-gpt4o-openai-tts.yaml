@@ -1,0 +1,24 @@
+name: whisper-base-gpt4o-openai-tts
+fixtures: tests/bench_fixtures/agentic_ja/fixtures.yaml
+runs: 3
+warmup: 1
+shuffle: false
+turn_timeout: 30.0
+
+simulation:
+  enabled: true
+  headless: true
+
+stt:
+  model: base
+  fp16: false
+
+llm:
+  model: gpt-4o
+  base_url: null
+  system_prompt: ja_default
+
+tts:
+  impl: openai
+  openai_voice: echo
+  openai_model: tts-1
