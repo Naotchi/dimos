@@ -16,12 +16,14 @@
 
 Subscribes to ``McpClient.agent: Out[BaseMessage]`` (autoconnect wires by
 ``(name, type)``) and feeds the text content of each ``AIMessage`` straight
-into ``OpenJTalkTTSNode`` -> ``SounddeviceAudioOutput``. Replaces the previous
-``JapaneseSpeakSkill`` which exposed a ``speak`` tool to the LLM.
+into ``StyleBertVits2TTSNode`` -> ``SounddeviceAudioOutput``. The TTS node
+exposes its native sample rate so the audio sink can be opened at a
+matching rate without resampling.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any
 
@@ -36,10 +38,22 @@ from dimos.core.core import rpc
 from dimos.core.module import Module
 from dimos.core.stream import In
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
-from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
+
+
+def _build_tts_node():
+    backend = os.environ.get("DIMOS_TTS_BACKEND", "sbv2").strip().lower()
+    if backend == "voicevox":
+        from dimos.stream.audio.tts.node_voicevox import VoicevoxTTSNode
+        logger.info("[TTS] backend=voicevox")
+        return VoicevoxTTSNode()
+    if backend not in ("sbv2", "style_bert_vits2", ""):
+        logger.warning("[TTS] unknown DIMOS_TTS_BACKEND=%r, falling back to sbv2", backend)
+    from dimos.stream.audio.tts.node_style_bert_vits2 import StyleBertVits2TTSNode
+    logger.info("[TTS] backend=sbv2")
+    return StyleBertVits2TTSNode()
 
 
 class AssistantSpeechNodeJa(Module):
@@ -58,8 +72,8 @@ class AssistantSpeechNodeJa(Module):
         self._first_chunk_pending = False
         self._first_chunk_lock = threading.Lock()
 
-        self._tts_node = OpenJTalkTTSNode()
-        self._audio_output = SounddeviceAudioOutput(sample_rate=48000)
+        self._tts_node = _build_tts_node()
+        self._audio_output = SounddeviceAudioOutput(sample_rate=self._tts_node.sample_rate)
 
         self._text_subject = Subject()
         self._tts_node.consume_text(self._text_subject)

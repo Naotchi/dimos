@@ -178,7 +178,12 @@ agents = [
     "sounddevice",
     "faster-whisper>=1.0.0",
     "websockets>=13",
-    "pyopenjtalk>=0.4.1",
+    # pyopenjtalk-plus: numpy 2.x ABI 対応の fork（API 互換）。
+    # 通常の pyopenjtalk は numpy<2 でビルドされた wheel しかなく、
+    # Style-Bert-VITS2 の g2p で ABI 不整合エラーを起こす。
+    "pyopenjtalk-plus>=0.4",
+    "style-bert-vits2>=2.4",
+    "huggingface_hub",
 ]
 
 web = [
