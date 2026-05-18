@@ -34,6 +34,7 @@ import yaml
 from dimos.agents.bench_ja import log_bench_event, new_turn, reset
 from dimos.agents.local_microphone_ja import LocalMicrophoneJa
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
+from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
     unitree_go2_agentic_local_tts,
@@ -66,9 +67,13 @@ def build_blueprint_args(cfg: dict[str, Any]) -> dict[str, Any]:
     sim = cfg.get("simulation", {})
     args["g"] = {"simulation": bool(sim.get("enabled", False))}
 
+    # NOTE: ModuleCoordinator dispatches blueprint_args by ``module_class.name``
+    # which is ``cls.__name__.lower()`` (see dimos/core/module.py). Keys MUST be
+    # lowercase or the override is silently ignored.
+
     stt = cfg.get("stt", {})
     if stt:
-        args["WhisperHumanInputJa"] = {
+        args["whisperhumaninputja"] = {
             "model": stt.get("model", "base"),
             "fp16": bool(stt.get("fp16", False)),
         }
@@ -77,15 +82,17 @@ def build_blueprint_args(cfg: dict[str, Any]) -> dict[str, Any]:
     llm_args: dict[str, Any] = {}
     if "model" in llm:
         llm_args["model"] = llm["model"]
-    if llm.get("base_url"):
-        llm_args["base_url"] = llm["base_url"]
     sp = llm.get("system_prompt", "ja_default")
     if sp != "ja_default":
         raise NotImplementedError(
             f"system_prompt={sp!r} not implemented; only 'ja_default' supported."
         )
     if llm_args:
-        args["TimedMcpClient"] = llm_args
+        args["timedmcpclient"] = llm_args
+    # ``base_url`` / ``api_key`` are not McpClientConfig fields; they flow
+    # through env (resolve_llm_model mirrors them into OPENAI_BASE_URL /
+    # OPENAI_API_KEY which langchain's create_agent picks up). See
+    # apply_llm_env() — called in main() before coordinator.build.
 
     tts = cfg.get("tts", {})
     if tts:
@@ -94,9 +101,31 @@ def build_blueprint_args(cfg: dict[str, Any]) -> dict[str, Any]:
             tts_args["openai_voice"] = tts["openai_voice"]
         if "openai_model" in tts:
             tts_args["openai_model"] = tts["openai_model"]
-        args["AssistantSpeechNodeJa"] = tts_args
+        args["assistantspeechnodeja"] = tts_args
 
     return args
+
+
+def apply_llm_env(cfg: dict[str, Any]) -> None:
+    """Mirror ``llm.base_url`` / ``llm.api_key`` from YAML into OPENAI_* env.
+
+    langchain's ``create_agent`` reads ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY``
+    at agent instantiation time. The blueprint module-load-time call to
+    ``resolve_llm_model()`` only fires for ``DIMOS_LLM_*`` env vars, so the
+    YAML-driven path sets ``OPENAI_*`` directly here, late enough that the
+    coordinator deploy will see it.
+    """
+    llm = cfg.get("llm", {}) or {}
+    if base_url := llm.get("base_url"):
+        os.environ["OPENAI_BASE_URL"] = base_url
+    api_key = llm.get("api_key")
+    if api_key is None and llm.get("base_url"):
+        # Local OpenAI-compatible servers (vLLM / LM Studio / Ollama) accept
+        # any non-empty key; surface a sentinel so the OpenAI client doesn't
+        # error on missing ``OPENAI_API_KEY``.
+        api_key = "dummy"
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
 
 
 def wav_seconds(path: Path) -> float:
@@ -148,6 +177,7 @@ def main() -> int:
     # Validate config (build args) before touching env or filesystem so that a
     # bad config exits cleanly without leaving a half-formed run dir behind.
     bp_args = build_blueprint_args(cfg)
+    apply_llm_env(cfg)
 
     os.environ.setdefault("MUJOCO_GL", "egl")
     warn_if_no_display_for_sim(cfg)
@@ -170,8 +200,12 @@ def main() -> int:
     )
     mcp_client = coordinator.get_instance(TimedMcpClient)
     mic = coordinator.get_instance(LocalMicrophoneJa)
+    speech = coordinator.get_instance(AssistantSpeechNodeJa)
 
     idle_event = threading.Event()
+    tts_idle_event = threading.Event()
+    tts_idle_event.set()  # idle until first speak_invoke
+    tts_was_busy = threading.Event()  # latched True once a speak_invoke fires
 
     def on_idle(is_idle: bool) -> None:
         if is_idle:
@@ -179,7 +213,15 @@ def main() -> int:
         else:
             idle_event.clear()
 
+    def on_tts_idle(is_idle: bool) -> None:
+        if is_idle:
+            tts_idle_event.set()
+        else:
+            tts_idle_event.clear()
+            tts_was_busy.set()
+
     mcp_client.agent_idle.subscribe(on_idle)
+    speech.tts_idle.subscribe(on_tts_idle)
 
     fx_path = Path(cfg["fixtures"])
     manifest = yaml.safe_load(fx_path.read_text())
@@ -194,6 +236,10 @@ def main() -> int:
         )
     )
     turn_timeout = float(cfg.get("turn_timeout", 30.0))
+    # TTS playback is unbounded by the LLM/agent timeout — a long response can
+    # take >30s of audio to drain. Use a separate, much larger cap so that the
+    # drain-gate doesn't false-positive and let the next fixture race ahead.
+    tts_drain_timeout = float(cfg.get("tts_drain_timeout", 300.0))
     print(f"[bench] {len(schedule)} runs scheduled", flush=True)
 
     for i, fx in enumerate(schedule):
@@ -203,6 +249,17 @@ def main() -> int:
                     f"[bench] WARN: idle wait timed out before fx {fx['id']}",
                     file=sys.stderr,
                 )
+            # Only block on TTS drain if this turn actually spoke. Tool-only
+            # turns never publish ``tts_idle=False``, so ``tts_was_busy``
+            # stays clear and we skip the wait (otherwise we'd hang on the
+            # stale-True fallthrough or the false-positive timeout).
+            if tts_was_busy.is_set():
+                if not tts_idle_event.wait(timeout=tts_drain_timeout):
+                    print(
+                        f"[bench] WARN: tts_idle wait timed out before fx {fx['id']}",
+                        file=sys.stderr,
+                    )
+                tts_was_busy.clear()
             idle_event.clear()
 
         wav_path = fx_path.parent / fx["wav"]
@@ -217,6 +274,7 @@ def main() -> int:
             run_idx=fx["run_idx"],
             warmup=fx["warmup"],
         )
+
 
         try:
             mic.inject_utterance(str(wav_path))

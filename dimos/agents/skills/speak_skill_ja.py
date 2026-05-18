@@ -23,6 +23,7 @@ at the node's native sample rate so the speak path never resamples.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Literal
 
 import reactivex.operators as ops
@@ -34,7 +35,7 @@ from reactivex.disposable import Disposable
 from dimos.agents.bench_ja import log_bench_event
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
-from dimos.core.stream import In
+from dimos.core.stream import In, Out
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
@@ -57,12 +58,14 @@ class AssistantSpeechNodeJaConfig(ModuleConfig):
     impl: Literal["open_jtalk", "sbv2", "voicevox", "openai"] = "sbv2"
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
+    idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
 
 
 class AssistantSpeechNodeJa(Module):
     """Speak assistant message text via a configurable Japanese TTS node."""
 
     agent: In[BaseMessage]
+    tts_idle: Out[bool]
     config: AssistantSpeechNodeJaConfig
 
     def _make_tts_node(self):
@@ -108,9 +111,16 @@ class AssistantSpeechNodeJa(Module):
         self._first_chunk_lock = threading.Lock()
 
         self._tts_node = self._make_tts_node()
+        self._playback_sample_rate = self._sample_rate_for(self._tts_node)
         self._audio_output = SounddeviceAudioOutput(
-            sample_rate=self._sample_rate_for(self._tts_node)
+            sample_rate=self._playback_sample_rate
         )
+
+        self._idle_lock = threading.Lock()
+        self._play_end_t = 0.0
+        self._idle_timer: threading.Timer | None = None
+        self._is_idle = True
+        self.tts_idle.publish(True)
 
         self._text_subject = Subject()
         self._tts_node.consume_text(self._text_subject)
@@ -124,13 +134,19 @@ class AssistantSpeechNodeJa(Module):
 
     @rpc
     def stop(self) -> None:
-        if self._text_subject is not None:
+        idle_lock = getattr(self, "_idle_lock", None)
+        if idle_lock is not None:
+            with idle_lock:
+                if self._idle_timer is not None:
+                    self._idle_timer.cancel()
+                    self._idle_timer = None
+        if getattr(self, "_text_subject", None) is not None:
             self._text_subject.on_completed()
             self._text_subject = None
-        if self._tts_node is not None:
+        if getattr(self, "_tts_node", None) is not None:
             self._tts_node.dispose()
             self._tts_node = None
-        if self._audio_output is not None:
+        if getattr(self, "_audio_output", None) is not None:
             self._audio_output.stop()
             self._audio_output = None
         super().stop()
@@ -152,15 +168,61 @@ class AssistantSpeechNodeJa(Module):
         log_bench_event("speak_invoke")
         with self._first_chunk_lock:
             self._first_chunk_pending = True
+        with self._idle_lock:
+            if self._idle_timer is not None:
+                self._idle_timer.cancel()
+                self._idle_timer = None
+            if self._is_idle:
+                self._is_idle = False
+                self.tts_idle.publish(False)
+                log_bench_event("tts_idle", idle=False)
         self._text_subject.on_next(content)
 
-    def _on_audio_chunk(self, _chunk: Any) -> None:
-        """Fire ``first_audio_out`` exactly once per ``_on_agent_message`` call."""
+    def _on_audio_chunk(self, chunk: Any) -> None:
+        """Fire ``first_audio_out`` once per utterance and extend the idle watchdog.
+
+        The watchdog tracks the last chunk's *playback* end time
+        (``now`` advanced by ``samples / sample_rate``) and fires
+        ``idle_grace_s`` seconds after it. New chunks push the timer
+        forward, so a streaming TTS that yields many chunks per
+        utterance stays "busy" until playback actually drains.
+        """
         with self._first_chunk_lock:
-            if not self._first_chunk_pending:
+            fire_first = self._first_chunk_pending
+            if fire_first:
+                self._first_chunk_pending = False
+        if fire_first:
+            log_bench_event("first_audio_out", tool="speak")
+
+        sample_rate = getattr(chunk, "sample_rate", self._playback_sample_rate)
+        channels = getattr(chunk, "channels", 1) or 1
+        data = getattr(chunk, "data", None)
+        if data is None or sample_rate <= 0:
+            return
+        frames = len(data) // max(channels, 1)
+        chunk_dur = frames / float(sample_rate)
+        if chunk_dur <= 0:
+            return
+
+        now = time.monotonic()
+        grace = float(self.config.idle_grace_s)
+        with self._idle_lock:
+            self._play_end_t = max(now, self._play_end_t) + chunk_dur
+            if self._idle_timer is not None:
+                self._idle_timer.cancel()
+            delay = max(0.0, self._play_end_t + grace - now)
+            self._idle_timer = threading.Timer(delay, self._on_idle_fire)
+            self._idle_timer.daemon = True
+            self._idle_timer.start()
+
+    def _on_idle_fire(self) -> None:
+        with self._idle_lock:
+            self._idle_timer = None
+            if self._is_idle:
                 return
-            self._first_chunk_pending = False
-        log_bench_event("first_audio_out", tool="speak")
+            self._is_idle = True
+        self.tts_idle.publish(True)
+        log_bench_event("tts_idle", idle=True)
 
 
 __all__ = ["AssistantSpeechNodeJa", "AssistantSpeechNodeJaConfig"]

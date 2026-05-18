@@ -1,13 +1,13 @@
 # STT 精度比較ハーネス 設計
 
 実施日: 2026-05-17
-関連: [voice-live-rewrite-design](2026-05-14-voice-live-rewrite-design.md), `docs/private/速度計測_比較_2026-05-16.md`
+関連: [voice-live-rewrite-design](2026-05-14-voice-live-rewrite-design.md), `docs/misc/速度計測_比較_2026-05-16.md`
 
 ## 背景と動機
 
 `unitree-go2-agentic-voice-live` を採用したそもそもの理由は「managed な
 Azure Voice Live のほうが STT の速度・精度で勝るだろう」という想定だった。
-しかし `docs/private/速度計測_比較_2026-05-16.md` の実測では:
+しかし `docs/misc/速度計測_比較_2026-05-16.md` の実測では:
 
 - local faster-whisper の `stt_s` p95 は 0.12s で、既に十分速い
 - Voice Live が e2e first-audio で速いのは streaming response（LLM/TTS

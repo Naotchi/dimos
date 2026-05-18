@@ -1,0 +1,22 @@
+name: whisper-largev3-qwen3-30b-a3b-2507-voicevox
+fixtures: tests/bench_fixtures/agentic_ja/fixtures.yaml
+runs: 3
+warmup: 1
+shuffle: false
+turn_timeout: 30.0
+
+simulation:
+  enabled: true
+  headless: true
+
+stt:
+  model: large-v3
+  fp16: true
+
+llm:
+  model: openai:qwen/qwen3-30b-a3b-2507
+  base_url: http://192.168.11.16:1234/v1
+  system_prompt: ja_default
+
+tts:
+  impl: voicevox

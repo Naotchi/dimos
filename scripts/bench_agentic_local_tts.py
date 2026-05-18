@@ -112,8 +112,12 @@ def build_turns(jsonl_path: Path) -> dict[str, dict[str, Any]]:
         elif kind == "first_audio_out":
             turns[current].setdefault("first_audio_out", row)
         elif kind == "turn_done":
+            # Do NOT close the turn here. ``turn_done`` is emitted when the
+            # agent loop publishes the final AIMessage, but ``first_audio_out``
+            # and ``tts_idle`` fire later (TTS chain is async, cross-process).
+            # The next ``user_audio_end`` re-opens with a new turn_id, which
+            # is the real boundary in this cascade flow.
             turns[current]["turn_done"] = row
-            current = None
         elif kind == "turn_timeout":
             turns[current]["turn_timeout"] = row
             current = None
