@@ -23,7 +23,7 @@ TTS node selected by ``impl`` (default ``open_jtalk``). Output goes to
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Literal
 
 import reactivex.operators as ops
 from langchain_core.messages import AIMessage
@@ -46,8 +46,8 @@ logger = setup_logger()
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
-    impl: str = "open_jtalk"  # one of: open_jtalk, openai
-    openai_voice: str = "echo"  # used when impl == "openai"
+    impl: Literal["open_jtalk", "openai"] = "open_jtalk"
+    openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
 
 
@@ -63,7 +63,7 @@ class AssistantSpeechNodeJa(Module):
             return OpenJTalkTTSNode()
         if impl == "openai":
             return OpenAITTSNode(
-                voice=Voice(self.config.openai_voice),
+                voice=self.config.openai_voice,
                 model=self.config.openai_model,
             )
         raise ValueError(f"Unknown AssistantSpeechNodeJa impl: {impl!r}")
@@ -121,6 +121,7 @@ class AssistantSpeechNodeJa(Module):
         self._text_subject.on_next(content)
 
     def _on_audio_chunk(self, _chunk: Any) -> None:
+        """Fire ``first_audio_out`` exactly once per ``_on_agent_message`` call."""
         with self._first_chunk_lock:
             if not self._first_chunk_pending:
                 return
