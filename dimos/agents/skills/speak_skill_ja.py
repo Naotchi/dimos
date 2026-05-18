@@ -15,9 +15,9 @@
 """Speak assistant messages directly via local Japanese TTS.
 
 Subscribes to ``McpClient.agent: Out[BaseMessage]`` (autoconnect wires by
-``(name, type)``) and feeds the text content of each ``AIMessage`` straight
-into ``OpenJTalkTTSNode`` -> ``SounddeviceAudioOutput``. Replaces the previous
-``JapaneseSpeakSkill`` which exposed a ``speak`` tool to the LLM.
+``(name, type)``) and feeds the text content of each ``AIMessage`` into a
+TTS node selected by ``impl`` (default ``open_jtalk``). Output goes to
+``SounddeviceAudioOutput``.
 """
 
 from __future__ import annotations
@@ -33,23 +33,40 @@ from reactivex.disposable import Disposable
 
 from dimos.agents.bench_ja import log_bench_event
 from dimos.core.core import rpc
-from dimos.core.module import Module
+from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
 from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
+from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
 
-class AssistantSpeechNodeJa(Module):
-    """Speak assistant message text via local Japanese TTS.
+class AssistantSpeechNodeJaConfig(ModuleConfig):
+    """Config selecting the underlying TTS implementation."""
 
-    Wired by autoconnect to ``McpClient.agent`` (Out[BaseMessage]) via the
-    matching ``agent: In[BaseMessage]`` field name + type.
-    """
+    impl: str = "open_jtalk"  # one of: open_jtalk, openai
+    openai_voice: str = "echo"  # used when impl == "openai"
+    openai_model: str = "tts-1"  # used when impl == "openai"
+
+
+class AssistantSpeechNodeJa(Module):
+    """Speak assistant message text via a configurable Japanese TTS node."""
 
     agent: In[BaseMessage]
+    config: AssistantSpeechNodeJaConfig
+
+    def _make_tts_node(self):
+        impl = self.config.impl
+        if impl == "open_jtalk":
+            return OpenJTalkTTSNode()
+        if impl == "openai":
+            return OpenAITTSNode(
+                voice=Voice(self.config.openai_voice),
+                model=self.config.openai_model,
+            )
+        raise ValueError(f"Unknown AssistantSpeechNodeJa impl: {impl!r}")
 
     @rpc
     def start(self) -> None:
@@ -58,7 +75,7 @@ class AssistantSpeechNodeJa(Module):
         self._first_chunk_pending = False
         self._first_chunk_lock = threading.Lock()
 
-        self._tts_node = OpenJTalkTTSNode()
+        self._tts_node = self._make_tts_node()
         self._audio_output = SounddeviceAudioOutput(sample_rate=48000)
 
         self._text_subject = Subject()
@@ -104,7 +121,6 @@ class AssistantSpeechNodeJa(Module):
         self._text_subject.on_next(content)
 
     def _on_audio_chunk(self, _chunk: Any) -> None:
-        """Fire ``first_audio_out`` exactly once per ``_on_agent_message`` call."""
         with self._first_chunk_lock:
             if not self._first_chunk_pending:
                 return
@@ -112,4 +128,4 @@ class AssistantSpeechNodeJa(Module):
         log_bench_event("first_audio_out", tool="speak")
 
 
-__all__ = ["AssistantSpeechNodeJa"]
+__all__ = ["AssistantSpeechNodeJa", "AssistantSpeechNodeJaConfig"]
