@@ -91,11 +91,44 @@ class VoicevoxParamsConfig(ModuleConfig):
     )
 
 
+class Sbv2ParamsConfig(ModuleConfig):
+    """Style-Bert-VITS2 synthesis params (category A)."""
+
+    speaker_id: int = Field(
+        default_factory=lambda: int(os.environ.get("DIMOS_SBV2_SPEAKER_ID", "0"))
+    )
+    style: str = Field(
+        default_factory=lambda: os.environ.get("DIMOS_SBV2_STYLE", "Neutral")
+    )
+    style_weight: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_STYLE_WEIGHT", "1.0"))
+    )
+    sdp_ratio: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_SDP_RATIO", "0.15"))
+    )
+    noise: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_NOISE", "0.4"))
+    )
+    noise_w: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_NOISE_W", "0.6"))
+    )
+    length: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_LENGTH", "1.1"))
+    )
+    pitch_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_PITCH_SCALE", "1.08"))
+    )
+    intonation_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_INTONATION_SCALE", "0.85"))
+    )
+
+
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
     impl: TtsImpl = Field(default_factory=_default_tts_impl)
     voicevox: VoicevoxParamsConfig = Field(default_factory=VoicevoxParamsConfig)
+    sbv2: Sbv2ParamsConfig = Field(default_factory=Sbv2ParamsConfig)
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
@@ -275,5 +308,6 @@ class AssistantSpeechNodeJa(Module):
 __all__ = [
     "AssistantSpeechNodeJa",
     "AssistantSpeechNodeJaConfig",
+    "Sbv2ParamsConfig",
     "VoicevoxParamsConfig",
 ]
