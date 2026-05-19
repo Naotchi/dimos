@@ -17,8 +17,26 @@ from dimos.agents.skills.speak_skill_ja import (
     VoicevoxParamsConfig,
 )
 
+# `dimos.robot.cli.dimos` calls load_dotenv() at import time, which can
+# populate DIMOS_VOICEVOX_* from the repo's .env. Default-value tests
+# explicitly clear those so they assert true defaults, not whatever the
+# developer happens to have in .env.
+_VOICEVOX_ENV_VARS = (
+    "DIMOS_VOICEVOX_SPEAKER_ID",
+    "DIMOS_VOICEVOX_SPEED_SCALE",
+    "DIMOS_VOICEVOX_PITCH_SCALE",
+    "DIMOS_VOICEVOX_INTONATION_SCALE",
+    "DIMOS_VOICEVOX_VOLUME_SCALE",
+)
 
-def test_default_speaker_id_is_74():
+
+def _clear_voicevox_env(monkeypatch):
+    for k in _VOICEVOX_ENV_VARS:
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_default_speaker_id_is_74(monkeypatch):
+    _clear_voicevox_env(monkeypatch)
     cfg = VoicevoxParamsConfig()
     assert cfg.speaker_id == 74
 
@@ -37,7 +55,8 @@ def test_explicit_beats_env(monkeypatch):
     assert cfg.speaker_id == 42
 
 
-def test_all_params_defaults():
+def test_all_params_defaults(monkeypatch):
+    _clear_voicevox_env(monkeypatch)
     cfg = VoicevoxParamsConfig()
     assert cfg.speed_scale == 1.0
     assert cfg.pitch_scale == 0.0

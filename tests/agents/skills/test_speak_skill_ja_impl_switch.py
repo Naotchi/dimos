@@ -32,7 +32,8 @@ def _build_node(impl: str, **extra) -> AssistantSpeechNodeJa:
     return AssistantSpeechNodeJa(impl=impl, **extra)
 
 
-def test_default_impl_is_sbv2():
+def test_default_impl_is_sbv2(monkeypatch):
+    monkeypatch.delenv("DIMOS_TTS_BACKEND", raising=False)
     cfg = AssistantSpeechNodeJaConfig()
     assert cfg.impl == "sbv2"
 
