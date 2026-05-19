@@ -71,10 +71,31 @@ def _default_tts_impl() -> TtsImpl:
     return raw  # type: ignore[return-value]
 
 
+class VoicevoxParamsConfig(ModuleConfig):
+    """VOICEVOX synthesis params (category A; env vars are default seeds only)."""
+
+    speaker_id: int = Field(
+        default_factory=lambda: int(os.environ.get("DIMOS_VOICEVOX_SPEAKER_ID", "74"))
+    )
+    speed_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_VOICEVOX_SPEED_SCALE", "1.0"))
+    )
+    pitch_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_VOICEVOX_PITCH_SCALE", "0.0"))
+    )
+    intonation_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_VOICEVOX_INTONATION_SCALE", "1.0"))
+    )
+    volume_scale: float = Field(
+        default_factory=lambda: float(os.environ.get("DIMOS_VOICEVOX_VOLUME_SCALE", "1.0"))
+    )
+
+
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
     impl: TtsImpl = Field(default_factory=_default_tts_impl)
+    voicevox: VoicevoxParamsConfig = Field(default_factory=VoicevoxParamsConfig)
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
@@ -244,4 +265,8 @@ class AssistantSpeechNodeJa(Module):
         log_bench_event("tts_idle", idle=True)
 
 
-__all__ = ["AssistantSpeechNodeJa", "AssistantSpeechNodeJaConfig"]
+__all__ = [
+    "AssistantSpeechNodeJa",
+    "AssistantSpeechNodeJaConfig",
+    "VoicevoxParamsConfig",
+]
