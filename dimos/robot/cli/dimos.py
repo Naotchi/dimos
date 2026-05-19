@@ -188,6 +188,19 @@ def _resolve_profile(name: str) -> tuple[Path | None, Path | None]:
     return (env_path if env_exists else None, config_path if config_exists else None)
 
 
+def _apply_profile(name: str) -> Path | None:
+    """Apply a profile: load its .env with override, return its config.json path.
+
+    The .env (if present) is loaded into process env with override=True so
+    the profile wins over any pre-existing shell variables. Returns the
+    config.json Path if the profile has one, else None.
+    """
+    env_path, config_path = _resolve_profile(name)
+    if env_path is not None:
+        load_dotenv(env_path, override=True)
+    return config_path
+
+
 def load_config_args(config: type[BaseModel], args: Iterable[str], path: Path) -> dict[str, Any]:
     try:
         kwargs = json.loads(path.read_text())
@@ -228,10 +241,25 @@ def run(
     config_path: Path = typer.Option(
         CONFIG_DIR / "dimos", "--config", "-c", help="Path to config file"
     ),
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        help="Named profile under configs/profiles/NAME/ (loads .env + config.json). Mutually exclusive with -c.",
+    ),
     show_help: bool = typer.Option(False, "--help"),
 ) -> None:
     """Start a robot blueprint"""
     logger.info("Starting DimOS")
+
+    if profile is not None:
+        src = ctx.get_parameter_source("config_path")
+        if src == click.core.ParameterSource.COMMANDLINE:
+            raise typer.BadParameter(
+                "`--profile` and `-c/--config` are mutually exclusive."
+            )
+        profile_config = _apply_profile(profile)
+        if profile_config is not None:
+            config_path = profile_config
 
     from dimos.core.coordination.blueprints import autoconnect
     from dimos.core.coordination.module_coordinator import ModuleCoordinator

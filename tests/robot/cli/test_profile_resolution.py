@@ -69,3 +69,40 @@ def test_reject_unsafe_names(tmp_path, monkeypatch, name):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError):
         _resolve_profile(name)
+
+
+import os
+from typer.testing import CliRunner
+
+
+def test_profile_and_config_are_mutually_exclusive(tmp_path, monkeypatch):
+    """`--profile` and `-c` together should error."""
+    from dimos.robot.cli.dimos import main
+
+    pdir = tmp_path / "configs" / "profiles" / "p1"
+    pdir.mkdir(parents=True)
+    (pdir / "config.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["run", "go2-base", "--profile", "p1", "-c", str(pdir / "config.json")],
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output.lower() or "exclusive" in result.output.lower()
+
+
+def test_profile_loads_env_with_override(tmp_path, monkeypatch):
+    """Profile `.env` overrides shell env (verified via process env after load)."""
+    from dimos.robot.cli.dimos import _apply_profile
+
+    pdir = tmp_path / "configs" / "profiles" / "p2"
+    pdir.mkdir(parents=True)
+    (pdir / ".env").write_text("DIMOS_TEST_KEY=from_profile\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DIMOS_TEST_KEY", "from_shell")
+
+    config_path = _apply_profile("p2")
+    assert os.environ["DIMOS_TEST_KEY"] == "from_profile"
+    assert config_path is None  # no config.json in this profile
