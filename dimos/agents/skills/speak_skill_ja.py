@@ -22,13 +22,15 @@ at the node's native sample rate so the speak path never resamples.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import reactivex.operators as ops
 from langchain_core.messages import AIMessage
 from langchain_core.messages.base import BaseMessage
+from pydantic import Field
 from reactivex import Subject
 from reactivex.disposable import Disposable
 
@@ -52,10 +54,27 @@ _STATIC_SAMPLE_RATE: dict[str, int] = {
 }
 
 
+TtsImpl = Literal["open_jtalk", "sbv2", "voicevox", "openai"]
+
+# DIMOS_TTS_BACKEND seeds the `impl` default for interactive runs. Bench /
+# YAML / explicit `AssistantSpeechNodeJaConfig(impl=...)` always wins — the
+# env is only consulted when no caller specified `impl`.
+def _default_tts_impl() -> TtsImpl:
+    raw = os.environ.get("DIMOS_TTS_BACKEND")
+    if raw is None:
+        return "sbv2"
+    valid = get_args(TtsImpl)
+    if raw not in valid:
+        raise ValueError(
+            f"DIMOS_TTS_BACKEND={raw!r} is not one of {valid}"
+        )
+    return raw  # type: ignore[return-value]
+
+
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
-    impl: Literal["open_jtalk", "sbv2", "voicevox", "openai"] = "sbv2"
+    impl: TtsImpl = Field(default_factory=_default_tts_impl)
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
