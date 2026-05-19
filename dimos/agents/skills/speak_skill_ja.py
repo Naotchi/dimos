@@ -159,7 +159,18 @@ class AssistantSpeechNodeJa(Module):
             from dimos.stream.audio.tts.node_style_bert_vits2 import (
                 StyleBertVits2TTSNode,
             )
-            return StyleBertVits2TTSNode()
+            s = self.config.sbv2
+            return StyleBertVits2TTSNode(
+                speaker_id=s.speaker_id,
+                style=s.style,
+                style_weight=s.style_weight,
+                sdp_ratio=s.sdp_ratio,
+                noise=s.noise,
+                noise_w=s.noise_w,
+                length=s.length,
+                pitch_scale=s.pitch_scale,
+                intonation_scale=s.intonation_scale,
+            )
         if impl == "voicevox":
             from dimos.stream.audio.tts.node_voicevox import VoicevoxTTSNode
             vv = self.config.voicevox

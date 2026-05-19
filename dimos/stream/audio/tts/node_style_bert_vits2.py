@@ -115,23 +115,16 @@ class StyleBertVits2TTSNode(AbstractTextConsumer, AbstractAudioEmitter, Abstract
         self.is_running = True
         self.text_queue: list[str] = []
         self.queue_lock = threading.Lock()
-        def _envf(name: str, default: float) -> float:
-            v = os.environ.get(name)
-            return float(v) if v is not None else default
 
-        def _envi(name: str, default: int) -> int:
-            v = os.environ.get(name)
-            return int(v) if v is not None else default
-
-        self._speaker_id = _envi("DIMOS_SBV2_SPEAKER_ID", speaker_id)
-        self._style = os.environ.get("DIMOS_SBV2_STYLE", style)
-        self._style_weight = _envf("DIMOS_SBV2_STYLE_WEIGHT", style_weight)
-        self._sdp_ratio = _envf("DIMOS_SBV2_SDP_RATIO", sdp_ratio)
-        self._noise = _envf("DIMOS_SBV2_NOISE", noise)
-        self._noise_w = _envf("DIMOS_SBV2_NOISE_W", noise_w)
-        self._length = _envf("DIMOS_SBV2_LENGTH", length)
-        self._pitch_scale = _envf("DIMOS_SBV2_PITCH_SCALE", pitch_scale)
-        self._intonation_scale = _envf("DIMOS_SBV2_INTONATION_SCALE", intonation_scale)
+        self._speaker_id = speaker_id
+        self._style = style
+        self._style_weight = style_weight
+        self._sdp_ratio = sdp_ratio
+        self._noise = noise
+        self._noise_w = noise_w
+        self._length = length
+        self._pitch_scale = pitch_scale
+        self._intonation_scale = intonation_scale
 
         bert_name = os.environ.get("DIMOS_SBV2_BERT_MODEL", _DEFAULT_BERT_MODEL)
         logger.info(f"Loading SBV2 BERT model: {bert_name}")

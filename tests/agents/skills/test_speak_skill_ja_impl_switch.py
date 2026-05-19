@@ -62,7 +62,7 @@ def test_impl_sbv2_routes_to_sbv2_module(monkeypatch):
     sentinel = object()
     import dimos.stream.audio.tts.node_style_bert_vits2 as sbv2_mod
 
-    monkeypatch.setattr(sbv2_mod, "StyleBertVits2TTSNode", lambda: sentinel)
+    monkeypatch.setattr(sbv2_mod, "StyleBertVits2TTSNode", lambda **kw: sentinel)
     node = _build_node(impl="sbv2")
     assert node._make_tts_node() is sentinel
 
