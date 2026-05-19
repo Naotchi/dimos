@@ -1,0 +1,12 @@
+{
+  "whisperhumaninputja": {
+    "model": "large-v3",
+    "fp16": true
+  },
+  "timedmcpclient": {
+    "model": "openai:qwen/qwen3-30b-a3b-2507"
+  },
+  "assistantspeechnodeja": {
+    "impl": "voicevox"
+  }
+}
