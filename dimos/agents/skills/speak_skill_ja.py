@@ -129,7 +129,14 @@ class AssistantSpeechNodeJa(Module):
             return StyleBertVits2TTSNode()
         if impl == "voicevox":
             from dimos.stream.audio.tts.node_voicevox import VoicevoxTTSNode
-            return VoicevoxTTSNode()
+            vv = self.config.voicevox
+            return VoicevoxTTSNode(
+                speaker_id=vv.speaker_id,
+                speed_scale=vv.speed_scale,
+                pitch_scale=vv.pitch_scale,
+                intonation_scale=vv.intonation_scale,
+                volume_scale=vv.volume_scale,
+            )
         raise ValueError(f"Unknown AssistantSpeechNodeJa impl: {impl!r}")
 
     def _sample_rate_for(self, node: Any) -> int:

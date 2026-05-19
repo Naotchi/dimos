@@ -71,7 +71,7 @@ def test_impl_voicevox_routes_to_voicevox_module(monkeypatch):
     sentinel = object()
     import dimos.stream.audio.tts.node_voicevox as vv_mod
 
-    monkeypatch.setattr(vv_mod, "VoicevoxTTSNode", lambda: sentinel)
+    monkeypatch.setattr(vv_mod, "VoicevoxTTSNode", lambda **kw: sentinel)
     node = _build_node(impl="voicevox")
     assert node._make_tts_node() is sentinel
 

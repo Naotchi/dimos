@@ -19,14 +19,15 @@ Mirrors ``StyleBertVits2TTSNode``'s interface so call sites only need an
 import swap. Talks to a VOICEVOX engine over HTTP (default
 ``http://127.0.0.1:50021``).
 
-Env vars:
+Synthesis params (speaker_id / *_scale) are passed in by the caller.
+The Config seed for those values lives in
+``AssistantSpeechNodeJaConfig.voicevox`` (see ``speak_skill_ja.py``).
+
+Env vars read directly here (category B: deployment-dependent):
 
 - ``DIMOS_VOICEVOX_URL``              base URL (default ``http://127.0.0.1:50021``)
-- ``DIMOS_VOICEVOX_SPEAKER_ID``       speaker style id (default ``74``: 東北イタコ ノーマル)
-- ``DIMOS_VOICEVOX_SPEED_SCALE``      playback speed (default ``1.0``)
-- ``DIMOS_VOICEVOX_PITCH_SCALE``      pitch shift in semitone-ish units (default ``0.0``)
-- ``DIMOS_VOICEVOX_INTONATION_SCALE`` prosody scale (default ``1.0``; <1 flatter)
-- ``DIMOS_VOICEVOX_VOLUME_SCALE``     volume (default ``1.0``)
+- ``DIMOS_VOICEVOX_PROBE_ATTEMPTS``   probe retry count (default ``10``)
+- ``DIMOS_VOICEVOX_PROBE_TIMEOUT``    per-probe timeout seconds (default ``10``)
 """
 
 from __future__ import annotations
@@ -57,21 +58,13 @@ class VoicevoxTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextEm
     def __init__(
         self,
         base_url: str | None = None,
-        speaker_id: int | None = None,
+        speaker_id: int = _DEFAULT_SPEAKER_ID,
         speed_scale: float = 1.0,
         pitch_scale: float = 0.0,
         intonation_scale: float = 1.0,
         volume_scale: float = 1.0,
         request_timeout: float = 30.0,
     ) -> None:
-        def _envf(name: str, default: float) -> float:
-            v = os.environ.get(name)
-            return float(v) if v is not None else default
-
-        def _envi(name: str, default: int) -> int:
-            v = os.environ.get(name)
-            return int(v) if v is not None else default
-
         self.audio_subject: Subject = Subject()  # type: ignore[type-arg]
         self.text_subject: Subject = Subject()  # type: ignore[type-arg]
         self.subscription = None
@@ -80,16 +73,15 @@ class VoicevoxTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextEm
         self.text_queue: list[str] = []
         self.queue_lock = threading.Lock()
 
-        self._base = os.environ.get(
-            "DIMOS_VOICEVOX_URL", base_url or _DEFAULT_URL
+        # base_url stays env-aware (category B: deployment-dependent endpoint).
+        self._base = (
+            base_url or os.environ.get("DIMOS_VOICEVOX_URL", _DEFAULT_URL)
         ).rstrip("/")
-        self._speaker_id = _envi(
-            "DIMOS_VOICEVOX_SPEAKER_ID", speaker_id if speaker_id is not None else _DEFAULT_SPEAKER_ID
-        )
-        self._speed_scale = _envf("DIMOS_VOICEVOX_SPEED_SCALE", speed_scale)
-        self._pitch_scale = _envf("DIMOS_VOICEVOX_PITCH_SCALE", pitch_scale)
-        self._intonation_scale = _envf("DIMOS_VOICEVOX_INTONATION_SCALE", intonation_scale)
-        self._volume_scale = _envf("DIMOS_VOICEVOX_VOLUME_SCALE", volume_scale)
+        self._speaker_id = speaker_id
+        self._speed_scale = speed_scale
+        self._pitch_scale = pitch_scale
+        self._intonation_scale = intonation_scale
+        self._volume_scale = volume_scale
         self._timeout = request_timeout
 
         # Probe so we fail fast at start() rather than on first utterance.
