@@ -71,15 +71,6 @@ def _default_tts_impl() -> TtsImpl:
     return raw  # type: ignore[return-value]
 
 
-# DIMOS_TTS_STREAMING seeds the `streaming` default for interactive runs.
-# Explicit config / YAML / bench always wins (category A behavior toggle).
-def _default_tts_streaming() -> bool:
-    raw = os.environ.get("DIMOS_TTS_STREAMING")
-    if raw is None:
-        return True
-    return raw.strip().lower() not in ("0", "false", "no", "off", "")
-
-
 class VoicevoxParamsConfig(ModuleConfig):
     """VOICEVOX synthesis params (category A; env vars are default seeds only)."""
 
@@ -141,7 +132,7 @@ class AssistantSpeechNodeJaConfig(ModuleConfig):
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
-    streaming: bool = Field(default_factory=_default_tts_streaming)
+    streaming: bool = True
 
 
 class AssistantSpeechNodeJa(Module):

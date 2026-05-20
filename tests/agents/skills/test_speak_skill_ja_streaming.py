@@ -22,19 +22,18 @@ from dimos.agents.skills.speak_skill_ja import (
 )
 
 
-def test_streaming_default_true(monkeypatch):
-    monkeypatch.delenv("DIMOS_TTS_STREAMING", raising=False)
+def test_streaming_default_true():
     assert AssistantSpeechNodeJaConfig().streaming is True
 
 
-def test_streaming_env_seed_false(monkeypatch):
-    monkeypatch.setenv("DIMOS_TTS_STREAMING", "0")
-    assert AssistantSpeechNodeJaConfig().streaming is False
+def test_streaming_explicit_false():
+    assert AssistantSpeechNodeJaConfig(streaming=False).streaming is False
 
 
-def test_streaming_explicit_overrides_env(monkeypatch):
+def test_streaming_ignores_env(monkeypatch):
+    # DIMOS_TTS_STREAMING was removed; the env must have no effect.
     monkeypatch.setenv("DIMOS_TTS_STREAMING", "0")
-    assert AssistantSpeechNodeJaConfig(streaming=True).streaming is True
+    assert AssistantSpeechNodeJaConfig().streaming is True
 
 
 def test_select_input_streaming_uses_agent_text():
