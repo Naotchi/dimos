@@ -41,7 +41,8 @@ def node(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 
-    n = AssistantSpeechNodeJa()
+    # streaming=False: these tests cover the legacy whole-message (non-streaming) path.
+    n = AssistantSpeechNodeJa(streaming=False)
     # subscribe is exercised by integration; here we stub it out to keep the
     # unit test focused on _on_agent_message / _on_audio_chunk logic.
     n.agent.subscribe = MagicMock(return_value=lambda: None)
@@ -117,16 +118,32 @@ def test_ai_message_list_content_is_dropped(node: Any) -> None:
     assert sent == []
 
 
-def test_speak_invoke_bench_event_emitted_once_per_message(node: Any) -> None:
+def test_speak_invoke_emitted_once_per_utterance(node: Any) -> None:
+    """speak_invoke fires on the idle->busy edge, not per message.
+
+    Two messages within one busy period (no idle gap) are one utterance.
+    """
     with patch("dimos.agents.skills.speak_skill_ja.log_bench_event") as logbench:
         node._on_agent_message(AIMessage(content="こんにちは"))
+        node._on_agent_message(AIMessage(content="さようなら"))
+
+    speak_invokes = [c for c in logbench.call_args_list if c.args == ("speak_invoke",)]
+    assert len(speak_invokes) == 1
+
+
+def test_speak_invoke_refires_after_idle(node: Any) -> None:
+    """A message arriving after the watchdog drained to idle starts a new utterance."""
+    with patch("dimos.agents.skills.speak_skill_ja.log_bench_event") as logbench:
+        node._on_agent_message(AIMessage(content="こんにちは"))
+        node._on_idle_fire()  # simulate the idle watchdog firing
         node._on_agent_message(AIMessage(content="さようなら"))
 
     speak_invokes = [c for c in logbench.call_args_list if c.args == ("speak_invoke",)]
     assert len(speak_invokes) == 2
 
 
-def test_first_audio_out_emitted_once_per_message(node: Any) -> None:
+def test_first_audio_out_emitted_once_per_utterance(node: Any) -> None:
+    """first_audio_out fires once per utterance (first chunk after idle->busy)."""
     with patch("dimos.agents.skills.speak_skill_ja.log_bench_event") as logbench:
         node._on_agent_message(AIMessage(content="こんにちは"))
         node._on_audio_chunk(object())
@@ -139,4 +156,4 @@ def test_first_audio_out_emitted_once_per_message(node: Any) -> None:
         c for c in logbench.call_args_list
         if c.args == ("first_audio_out",) and c.kwargs.get("tool") == "speak"
     ]
-    assert len(first_audio_calls) == 2
+    assert len(first_audio_calls) == 1

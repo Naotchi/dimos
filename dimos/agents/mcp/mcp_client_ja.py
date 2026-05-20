@@ -31,6 +31,8 @@ from dimos.agents.bench_ja.llm_usage import extract_usage
 from dimos.agents.bench_ja.stream_tracker import StepFirstTokenTracker
 from dimos.agents.mcp.mcp_client import McpClient
 from dimos.agents.utils import pretty_print_langchain_message
+from dimos.core.stream import Out
+from dimos.stream.audio.tts.sentence_stream import SentenceAccumulator
 
 
 class TimedMcpClient(McpClient):
@@ -44,6 +46,8 @@ class TimedMcpClient(McpClient):
       - first_tool_call : first tool_call observed in any LLM step, once per turn
       - turn_done       : total turn time, llm time, step count, tool call count
     """
+
+    agent_text: Out[str]
 
     def _process_message(
         self, state_graph: CompiledStateGraph[Any, Any, Any, Any], message: BaseMessage
@@ -59,6 +63,7 @@ class TimedMcpClient(McpClient):
         total_llm = 0.0
         n_tool_calls = 0
         first_tool_logged = False
+        sentence_acc = SentenceAccumulator()
 
         # LangGraph's prebuilt agent node has been called "agent" historically
         # and "model" in newer versions; treat both as the LLM step.
@@ -73,6 +78,22 @@ class TimedMcpClient(McpClient):
             for ev in tracker.feed(mode, payload):
                 if ev["kind"] == "llm_first_token":
                     log_bench_event("llm_first_token", step_idx=ev["step_idx"])
+                continue
+
+            # Stream sentences out of LLM token chunks as soon as they form,
+            # so the TTS node can start on sentence 1 before the turn ends.
+            if mode == "messages":
+                chunk, meta = payload
+                node = meta.get("langgraph_node") if isinstance(meta, dict) else None
+                if node in llm_nodes:
+                    # Assumes str-content deltas (OpenAI-compatible chat
+                    # backends, incl. the local Qwen/vLLM target). A future
+                    # content-block-streaming provider would yield list
+                    # content here and emit nothing on agent_text.
+                    content = getattr(chunk, "content", "")
+                    if isinstance(content, str) and content:
+                        for sentence in sentence_acc.push(content):
+                            self.agent_text.publish(sentence)
                 continue
 
             if mode != "updates":
@@ -118,6 +139,10 @@ class TimedMcpClient(McpClient):
                     self._history.append(msg)
                     pretty_print_langchain_message(msg)
                     self.agent.publish(msg)
+                if node_name in llm_nodes:
+                    rest = sentence_acc.flush()
+                    if rest:
+                        self.agent_text.publish(rest)
                 step_t0 = time.perf_counter()
 
         log_bench_event(
