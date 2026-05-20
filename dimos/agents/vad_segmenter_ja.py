@@ -62,6 +62,37 @@ class VadStreamSegmenter:
         self._utt: list[np.ndarray] = []
         self._utt_samples = 0
 
+    @classmethod
+    def from_config(cls, cfg: Any) -> "VadStreamSegmenter":
+        """Build a segmenter backed by a real silero VADIterator.
+
+        Isolated here so the silero/torch dependency is only required when
+        vad mode is actually selected.
+        """
+        try:
+            from silero_vad import VADIterator, load_silero_vad
+        except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
+            raise RuntimeError(
+                "mic_mode='vad' requires the silero-vad package. "
+                "Install fork extras with: uv sync --extra all"
+            ) from exc
+
+        model = load_silero_vad()
+        vad_iterator = VADIterator(
+            model,
+            threshold=cfg.vad_threshold,
+            sampling_rate=cfg.sample_rate,
+            min_silence_duration_ms=cfg.vad_min_silence_ms,
+            speech_pad_ms=cfg.vad_speech_pad_ms,
+        )
+        return cls(
+            vad_iterator,
+            sample_rate=cfg.sample_rate,
+            speech_pad_ms=cfg.vad_speech_pad_ms,
+            min_speech_ms=cfg.vad_min_speech_ms,
+            max_utterance_seconds=cfg.max_utterance_seconds,
+        )
+
     @staticmethod
     def chunk_samples_for(sample_rate: int) -> int:
         """silero の窓サイズ。LocalMicrophoneJa がマイクの block_size に使う。"""

@@ -1,9 +1,11 @@
 """VadStreamSegmenter の単体テスト（silero VADIterator はモック）。"""
 from __future__ import annotations
 
+import builtins
 import time
 
 import numpy as np
+import pytest
 
 from dimos.agents.vad_segmenter_ja import VadStreamSegmenter
 from dimos.stream.audio.base import AudioEvent
@@ -121,3 +123,40 @@ def test_max_utterance_force_flush():
     forced = seg.feed(_chunk_event())            # 3ch → max 到達で強制 flush
     assert forced is not None
     assert it.reset_calls == 1
+
+
+def test_from_config_raises_clear_error_when_silero_missing(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "silero_vad":
+            raise ImportError("No module named 'silero_vad'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    class Cfg:
+        vad_threshold = 0.5
+        vad_min_silence_ms = 700
+        vad_speech_pad_ms = 300
+        vad_min_speech_ms = 200
+        sample_rate = 16000
+        max_utterance_seconds = 60.0
+
+    with pytest.raises(RuntimeError, match="uv sync --extra all"):
+        VadStreamSegmenter.from_config(Cfg())
+
+
+def test_from_config_builds_real_segmenter():
+    pytest.importorskip("silero_vad")
+
+    class Cfg:
+        vad_threshold = 0.5
+        vad_min_silence_ms = 700
+        vad_speech_pad_ms = 300
+        vad_min_speech_ms = 200
+        sample_rate = 16000
+        max_utterance_seconds = 60.0
+
+    seg = VadStreamSegmenter.from_config(Cfg())
+    assert isinstance(seg, VadStreamSegmenter)
