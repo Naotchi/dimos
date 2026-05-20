@@ -24,6 +24,10 @@ expects complete utterances (not 64 ms PortAudio frames).
 Pairs with :class:`PttKeyboard` via autoconnect on ``mic_gate``. If nothing
 publishes to ``mic_gate``, no audio is emitted — intentional so an
 unconfigured deployment fails loud rather than hot-miking the user.
+
+vad モード有効化: プロファイルの config.json に
+``"localmicrophoneja": {"mic_mode": "vad"}`` を書く（env では設定しない）。
+hold（既定）は従来通り PttKeyboard の F9 押下中のみ録音。
 """
 from __future__ import annotations
 
