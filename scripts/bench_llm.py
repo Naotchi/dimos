@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 """Config-driven LLM/STT/TTS bench runner.
 
-Boots ``unitree_go2_agentic_local_tts`` with module configs injected from a
-YAML file, injects fixture wavs via ``LocalMicrophoneJa.inject_utterance``,
-and writes bench events to ``logs/{ts}-{config.name}/main.jsonl``. A copy
-of the config plus a sha256 hash are recorded so each run is
-self-describing.
+Boots ``unitree_go2_agentic_local_tts`` with module configs resolved from a
+profile (``configs/profiles/<name>/config.json``), injects fixture wavs via
+``LocalMicrophoneJa.inject_utterance``, and writes bench events to
+``logs/{ts}-{config.name}/main.jsonl``.
+
+The bench YAML references a profile name; ``apply_profile`` loads the profile
+``.env`` before the blueprint is imported so that ``resolve_llm_model()`` (which
+runs at blueprint import time) sees the correct ``DIMOS_LLM_*`` values.
 
 For headless MuJoCo runs, invoke under ``xvfb-run`` on Linux:
 
@@ -36,10 +39,11 @@ from dimos.agents.local_microphone_ja import LocalMicrophoneJa
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
-from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
-    unitree_go2_agentic_local_tts,
-)
 from dimos.utils.logging_config import set_run_log_dir
+
+# NOTE: dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts
+# is intentionally NOT imported here. It calls resolve_llm_model() at module load,
+# which reads DIMOS_LLM_* env vars. Import is deferred to main() AFTER apply_profile().
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,8 +54,9 @@ def parse_args() -> argparse.Namespace:
 
 def load_config(path: Path) -> dict[str, Any]:
     cfg = yaml.safe_load(path.read_text())
-    if "name" not in cfg:
-        raise ValueError(f"config {path} missing required 'name' field")
+    for required in ("name", "profile"):
+        if required not in cfg:
+            raise ValueError(f"config {path} missing required {required!r} field")
     return cfg
 
 
@@ -60,72 +65,17 @@ def config_hash(cfg: dict[str, Any]) -> str:
     return hashlib.sha256(norm).hexdigest()[:8]
 
 
-def build_blueprint_args(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Translate YAML config into ModuleCoordinator.build blueprint_args."""
-    args: dict[str, Any] = {}
+def redacted_endpoint(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Capture the resolved LLM endpoint for the run record, minus secrets.
 
-    sim = cfg.get("simulation", {})
-    args["g"] = {"simulation": bool(sim.get("enabled", False))}
-
-    # NOTE: ModuleCoordinator dispatches blueprint_args by ``module_class.name``
-    # which is ``cls.__name__.lower()`` (see dimos/core/module.py). Keys MUST be
-    # lowercase or the override is silently ignored.
-
-    stt = cfg.get("stt", {})
-    if stt:
-        args["whisperhumaninputja"] = {
-            "model": stt.get("model", "base"),
-            "fp16": bool(stt.get("fp16", False)),
-        }
-
-    llm = cfg.get("llm", {})
-    llm_args: dict[str, Any] = {}
-    if "model" in llm:
-        llm_args["model"] = llm["model"]
-    sp = llm.get("system_prompt", "ja_default")
-    if sp != "ja_default":
-        raise NotImplementedError(
-            f"system_prompt={sp!r} not implemented; only 'ja_default' supported."
-        )
-    if llm_args:
-        args["timedmcpclient"] = llm_args
-    # ``base_url`` / ``api_key`` are not McpClientConfig fields; they flow
-    # through env (resolve_llm_model mirrors them into OPENAI_BASE_URL /
-    # OPENAI_API_KEY which langchain's create_agent picks up). See
-    # apply_llm_env() — called in main() before coordinator.build.
-
-    tts = cfg.get("tts", {})
-    if tts:
-        tts_args = {"impl": tts.get("impl", "open_jtalk")}
-        if "openai_voice" in tts:
-            tts_args["openai_voice"] = tts["openai_voice"]
-        if "openai_model" in tts:
-            tts_args["openai_model"] = tts["openai_model"]
-        args["assistantspeechnodeja"] = tts_args
-
-    return args
-
-
-def apply_llm_env(cfg: dict[str, Any]) -> None:
-    """Mirror ``llm.base_url`` / ``llm.api_key`` from YAML into OPENAI_* env.
-
-    langchain's ``create_agent`` reads ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY``
-    at agent instantiation time. The blueprint module-load-time call to
-    ``resolve_llm_model()`` only fires for ``DIMOS_LLM_*`` env vars, so the
-    YAML-driven path sets ``OPENAI_*`` directly here, late enough that the
-    coordinator deploy will see it.
+    ``resolve_llm_model`` (fired at blueprint import after ``apply_profile``)
+    mirrors the profile's DIMOS_LLM_* into OPENAI_*. We record base_url + model
+    so the run is self-describing; the api_key is intentionally never logged.
     """
-    llm = cfg.get("llm", {}) or {}
-    if base_url := llm.get("base_url"):
-        os.environ["OPENAI_BASE_URL"] = base_url
-    api_key = llm.get("api_key")
-    if api_key is None and llm.get("base_url"):
-        # Local OpenAI-compatible servers (vLLM / LM Studio / Ollama) accept
-        # any non-empty key; surface a sentinel so the OpenAI client doesn't
-        # error on missing ``OPENAI_API_KEY``.
-        api_key = "dummy"
-    if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
+    return {
+        "base_url": os.environ.get("OPENAI_BASE_URL"),
+        "model": (kwargs.get("timedmcpclient") or {}).get("model"),
+    }
 
 
 def wav_seconds(path: Path) -> float:
@@ -145,7 +95,8 @@ def fixture_iter(fixtures: list[dict[str, Any]], runs: int, warmup: int, shuffle
             yield {**fx, "run_idx": run_idx, "warmup": run_idx < warmup}
 
 
-def setup_run_dir(cfg: dict[str, Any], cfg_path: Path) -> Path:
+def setup_run_dir(cfg: dict[str, Any], cfg_path: Path, config_path: Path, kwargs: dict[str, Any]) -> Path:
+    # Task 5 finalizes the run-record contents (config_path and kwargs are reserved for it).
     ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     out_dir = Path("logs") / f"{ts}-{cfg['name']}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -154,50 +105,61 @@ def setup_run_dir(cfg: dict[str, Any], cfg_path: Path) -> Path:
     return out_dir
 
 
-def warn_if_no_display_for_sim(cfg: dict[str, Any]) -> None:
-    sim = cfg.get("simulation", {})
-    if not sim.get("enabled"):
-        return
-    if not sim.get("headless"):
+def warn_if_no_display_for_sim(cfg: dict[str, Any], kwargs: dict[str, Any]) -> None:
+    sim_on = bool((kwargs.get("g") or {}).get("simulation"))
+    if not sim_on or not cfg.get("headless"):
         return
     if os.environ.get("DISPLAY"):
         return
     print(
-        "[bench] WARN: simulation.headless=true but no DISPLAY is set. "
+        "[bench] WARN: simulation on + headless but no DISPLAY. "
         "MuJoCo viewer.launch_passive will fail. Invoke via 'xvfb-run -a'.",
         file=sys.stderr,
     )
 
 
 def main() -> int:
+    import copy
+
+    from dimos.agents.profile_ja import apply_profile, resolve_profile
+
     args = parse_args()
     cfg_path = Path(args.config)
     cfg = load_config(cfg_path)
 
-    # Validate config (build args) before touching env or filesystem so that a
-    # bad config exits cleanly without leaving a half-formed run dir behind.
-    bp_args = build_blueprint_args(cfg)
-    apply_llm_env(cfg)
+    # Load the profile .env BEFORE importing the blueprint: the blueprint module
+    # calls resolve_llm_model() at import time, which reads DIMOS_LLM_* and
+    # mirrors them into OPENAI_*. Importing earlier would miss the profile env.
+    apply_profile(cfg["profile"])
+    from dimos.robot.cli.dimos import load_config_args
+    from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
+        unitree_go2_agentic_local_tts as blueprint,
+    )
+
+    _, config_path = resolve_profile(cfg["profile"])
+    if config_path is None:
+        raise ValueError(f"profile {cfg['profile']!r} has no config.json")
+    kwargs = load_config_args(blueprint.config(), [], config_path)
 
     os.environ.setdefault("MUJOCO_GL", "egl")
-    warn_if_no_display_for_sim(cfg)
+    warn_if_no_display_for_sim(cfg, kwargs)
 
-    out_dir = setup_run_dir(cfg, cfg_path)
+    out_dir = setup_run_dir(cfg, cfg_path, config_path, kwargs)
+    print(f"[bench] {cfg['name']} ({cfg['profile']}) → {out_dir}", flush=True)
 
-    print(f"[bench] {cfg['name']} → {out_dir}", flush=True)
-
+    # build() pops "g" from kwargs in place, so snapshot for the record first.
+    resolved_snapshot = copy.deepcopy(kwargs)
     log_bench_event(
         "run_meta",
         config_name=cfg["name"],
-        config_hash=config_hash(cfg),
-        config=cfg,
+        profile=cfg["profile"],
+        resolved_config=resolved_snapshot,
+        resolved_endpoint=redacted_endpoint(kwargs),
+        config_hash=config_hash(resolved_snapshot),
         started_at=datetime.now().isoformat(),
     )
 
-    coordinator = ModuleCoordinator.build(
-        unitree_go2_agentic_local_tts,
-        blueprint_args=bp_args,
-    )
+    coordinator = ModuleCoordinator.build(blueprint, kwargs)
     mcp_client = coordinator.get_instance(TimedMcpClient)
     mic = coordinator.get_instance(LocalMicrophoneJa)
     speech = coordinator.get_instance(AssistantSpeechNodeJa)
