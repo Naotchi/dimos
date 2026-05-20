@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import Field
@@ -66,6 +66,13 @@ class LocalMicrophoneJaConfig(ModuleConfig):
     max_utterance_seconds: float = Field(
         default_factory=lambda: float(os.environ.get(f"{_ENV_PREFIX}MAX_SECONDS", "60"))
     )
+
+    # --- VAD / hold モード切り替え（実行場所非依存 → env seed なし、profile 専管）---
+    mic_mode: Literal["hold", "vad"] = Field(default="hold")
+    vad_threshold: float = Field(default=0.5)
+    vad_min_silence_ms: int = Field(default=700)
+    vad_speech_pad_ms: int = Field(default=300)
+    vad_min_speech_ms: int = Field(default=200)
 
 
 class LocalMicrophoneJa(Module):
