@@ -125,6 +125,46 @@ def test_max_utterance_force_flush():
     assert it.reset_calls == 1
 
 
+def test_feed_converts_float32_mic_input_to_pcm16():
+    # SounddeviceAudioSource emits float32 [-1, 1] by default. A naive int16
+    # cast would zero those samples and feed silence to the VAD; verify the
+    # frame is quantized to PCM16 so silero sees the real signal and the
+    # emitted utterance carries non-zero int16 audio.
+    captured = []
+
+    class CapturingIter:
+        def __init__(self):
+            self.script = [{"start": 0}, {"end": 0}]
+
+        def __call__(self, chunk, return_seconds=False):
+            captured.append(chunk)
+            return self.script.pop(0) if self.script else None
+
+        def reset_states(self):
+            pass
+
+    seg = _seg(CapturingIter())
+
+    def _f32_event(value: float) -> AudioEvent:
+        return AudioEvent(
+            data=np.full(512, value, dtype=np.float32),
+            sample_rate=16000,
+            timestamp=time.time(),
+            channels=1,
+        )
+
+    assert seg.feed(_f32_event(0.5)) is None     # start
+    utt = seg.feed(_f32_event(0.5))              # end → emit
+
+    # silero received normalized float32 ~0.5 (not floored to 0).
+    assert captured[0].dtype == np.float32
+    assert abs(float(captured[0][0]) - 0.5) < 0.01
+    # utterance is int16 PCM with the signal preserved.
+    assert utt is not None
+    assert utt.data.dtype == np.int16
+    assert int(utt.data[0]) != 0
+
+
 def test_from_config_raises_clear_error_when_silero_missing(monkeypatch):
     real_import = builtins.__import__
 

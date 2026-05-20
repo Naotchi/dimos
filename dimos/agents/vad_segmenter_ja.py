@@ -103,7 +103,15 @@ class VadStreamSegmenter:
 
     def feed(self, event: AudioEvent) -> AudioEvent | None:
         """Consume one mic frame (must be exactly one VAD window)."""
-        data = np.asarray(event.data, dtype=np.int16).reshape(-1)
+        raw = np.asarray(event.data).reshape(-1)
+        if raw.dtype == np.int16:
+            data = raw
+        else:
+            # SounddeviceAudioSource defaults to float32 in [-1, 1]; a plain
+            # int16 cast would floor those to 0 and feed silence to the VAD.
+            # Quantize to int16 PCM so the int16 buffer and downstream
+            # AudioNormalizer.to_float32() round-trip cleanly.
+            data = (np.clip(raw, -1.0, 1.0) * 32767.0).astype(np.int16)
         if data.size != self.chunk:
             raise ValueError(
                 f"VAD expects {self.chunk}-sample frames, got {data.size}; "
