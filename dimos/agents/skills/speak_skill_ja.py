@@ -71,7 +71,6 @@ def _default_tts_impl() -> TtsImpl:
     return raw  # type: ignore[return-value]
 
 
-
 class VoicevoxParamsConfig(ModuleConfig):
     """VOICEVOX synthesis params (category A; env vars are default seeds only)."""
 
