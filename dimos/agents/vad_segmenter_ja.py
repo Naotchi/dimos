@@ -84,5 +84,52 @@ class VadStreamSegmenter:
         # silero wants float32 in [-1, 1]; keep int16 for the utterance buffer.
         vad_chunk = chunk_i16.astype(np.float32) / 32768.0
         res = self._iter(vad_chunk)
-        # placeholder: full state machine added in Task 3
+
+        if res is not None and "start" in res and not self._recording:
+            self._recording = True
+            self._utt = list(self._preroll)
+            self._utt_samples = self._preroll_total
+            self._preroll.clear()
+            self._preroll_total = 0
+            self._append(chunk_i16)
+            return None
+
+        if res is not None and "end" in res and self._recording:
+            self._append(chunk_i16)
+            return self._finalize(event, forced=False)
+
+        if self._recording:
+            self._append(chunk_i16)
+            if self._utt_samples >= self._max_samples:
+                return self._finalize(event, forced=True)
+            return None
+
+        # idle: keep a rolling preroll of recent audio.
+        self._preroll.append(chunk_i16)
+        self._preroll_total += chunk_i16.size
+        while self._preroll_total > self._preroll_samples and self._preroll:
+            self._preroll_total -= self._preroll.popleft().size
         return None
+
+    def _append(self, chunk_i16: np.ndarray) -> None:
+        self._utt.append(chunk_i16)
+        self._utt_samples += chunk_i16.size
+
+    def _finalize(self, event: AudioEvent, *, forced: bool) -> AudioEvent | None:
+        self._iter.reset_states()
+        utt, samples = self._utt, self._utt_samples
+        self._recording = False
+        self._utt = []
+        self._utt_samples = 0
+        if not forced and samples < self._min_speech_samples:
+            logger.info("VAD: dropping short utterance (%d samples)", samples)
+            return None
+        if not utt:
+            return None
+        data = np.concatenate(utt)
+        return AudioEvent(
+            data=data,
+            sample_rate=self._sr,
+            timestamp=event.timestamp,
+            channels=event.channels,
+        )
