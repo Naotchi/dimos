@@ -71,6 +71,15 @@ def _default_tts_impl() -> TtsImpl:
     return raw  # type: ignore[return-value]
 
 
+# DIMOS_TTS_STREAMING seeds the `streaming` default for interactive runs.
+# Explicit config / YAML / bench always wins (category A behavior toggle).
+def _default_tts_streaming() -> bool:
+    raw = os.environ.get("DIMOS_TTS_STREAMING")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
 class VoicevoxParamsConfig(ModuleConfig):
     """VOICEVOX synthesis params (category A; env vars are default seeds only)."""
 
@@ -132,12 +141,14 @@ class AssistantSpeechNodeJaConfig(ModuleConfig):
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
+    streaming: bool = Field(default_factory=_default_tts_streaming)
 
 
 class AssistantSpeechNodeJa(Module):
     """Speak assistant message text via a configurable Japanese TTS node."""
 
     agent: In[BaseMessage]
+    agent_text: In[str]
     tts_idle: Out[bool]
     config: AssistantSpeechNodeJaConfig
 
@@ -194,6 +205,18 @@ class AssistantSpeechNodeJa(Module):
             return int(sr)
         return _STATIC_SAMPLE_RATE[self.config.impl]
 
+    def _select_input(self):
+        """Pick (stream, callback) for this run based on ``config.streaming``.
+
+        Streaming feeds pre-segmented sentences from the producer's
+        ``agent_text`` port; non-streaming consumes whole ``AIMessage``s
+        from ``agent`` (legacy behavior). Only one is ever subscribed, so
+        no double-speak even though autoconnect wires both ports.
+        """
+        if self.config.streaming:
+            return self.agent_text, self._on_agent_text
+        return self.agent, self._on_agent_message
+
     @rpc
     def start(self) -> None:
         super().start()
@@ -219,9 +242,8 @@ class AssistantSpeechNodeJa(Module):
         tapped = self._tts_node.emit_audio().pipe(ops.do_action(self._on_audio_chunk))
         self._audio_output.consume_audio(tapped)
 
-        self.register_disposable(
-            Disposable(self.agent.subscribe(self._on_agent_message))
-        )
+        stream, callback = self._select_input()
+        self.register_disposable(Disposable(stream.subscribe(callback)))
 
     @rpc
     def stop(self) -> None:
@@ -248,7 +270,20 @@ class AssistantSpeechNodeJa(Module):
         content = msg.content
         if not isinstance(content, str):
             return
-        if content.strip() == "":
+        self._speak(content)
+
+    def _on_agent_text(self, text: str) -> None:
+        self._speak(text)
+
+    def _speak(self, text: str) -> None:
+        """Feed one text unit into TTS, firing utterance-start once per idle edge.
+
+        ``speak_invoke`` / ``first_audio_out`` anchor on the idle->busy
+        transition, so a streaming turn that submits many sentences logs a
+        single utterance start (matching the bench ``speak_tts_s`` metric,
+        which uses ``speak_invokes[0]``).
+        """
+        if text.strip() == "":
             return
         if self._text_subject is None:
             logger.warning(
@@ -256,18 +291,20 @@ class AssistantSpeechNodeJa(Module):
             )
             return
 
-        log_bench_event("speak_invoke")
-        with self._first_chunk_lock:
-            self._first_chunk_pending = True
         with self._idle_lock:
-            if self._idle_timer is not None:
-                self._idle_timer.cancel()
-                self._idle_timer = None
-            if self._is_idle:
+            starting = self._is_idle
+            if starting:
                 self._is_idle = False
+                if self._idle_timer is not None:
+                    self._idle_timer.cancel()
+                    self._idle_timer = None
                 self.tts_idle.publish(False)
                 log_bench_event("tts_idle", idle=False)
-        self._text_subject.on_next(content)
+        if starting:
+            log_bench_event("speak_invoke")
+            with self._first_chunk_lock:
+                self._first_chunk_pending = True
+        self._text_subject.on_next(text)
 
     def _on_audio_chunk(self, chunk: Any) -> None:
         """Fire ``first_audio_out`` once per utterance and extend the idle watchdog.
