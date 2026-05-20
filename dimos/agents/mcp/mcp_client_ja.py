@@ -86,6 +86,10 @@ class TimedMcpClient(McpClient):
                 chunk, meta = payload
                 node = meta.get("langgraph_node") if isinstance(meta, dict) else None
                 if node in llm_nodes:
+                    # Assumes str-content deltas (OpenAI-compatible chat
+                    # backends, incl. the local Qwen/vLLM target). A future
+                    # content-block-streaming provider would yield list
+                    # content here and emit nothing on agent_text.
                     content = getattr(chunk, "content", "")
                     if isinstance(content, str) and content:
                         for sentence in sentence_acc.push(content):
