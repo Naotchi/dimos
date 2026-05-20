@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -119,9 +120,7 @@ def warn_if_no_display_for_sim(cfg: dict[str, Any], kwargs: dict[str, Any]) -> N
 
 
 def main() -> int:
-    import copy
-
-    from dimos.agents.profile_ja import apply_profile, resolve_profile
+    from dimos.agents.profile_ja import apply_profile
 
     args = parse_args()
     cfg_path = Path(args.config)
@@ -130,13 +129,12 @@ def main() -> int:
     # Load the profile .env BEFORE importing the blueprint: the blueprint module
     # calls resolve_llm_model() at import time, which reads DIMOS_LLM_* and
     # mirrors them into OPENAI_*. Importing earlier would miss the profile env.
-    apply_profile(cfg["profile"])
+    config_path = apply_profile(cfg["profile"])
     from dimos.robot.cli.dimos import load_config_args
     from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
         unitree_go2_agentic_local_tts as blueprint,
     )
 
-    _, config_path = resolve_profile(cfg["profile"])
     if config_path is None:
         raise ValueError(f"profile {cfg['profile']!r} has no config.json")
     kwargs = load_config_args(blueprint.config(), [], config_path)
@@ -154,7 +152,7 @@ def main() -> int:
         config_name=cfg["name"],
         profile=cfg["profile"],
         resolved_config=resolved_snapshot,
-        resolved_endpoint=redacted_endpoint(kwargs),
+        resolved_endpoint=redacted_endpoint(resolved_snapshot),
         config_hash=config_hash(resolved_snapshot),
         started_at=datetime.now().isoformat(),
     )
