@@ -27,8 +27,10 @@ from __future__ import annotations
 import re
 
 # A run of non-terminator chars followed by one-or-more sentence-final
-# terminators (JA + ASCII) or newlines. Consecutive terminators stay with
-# the sentence they close (e.g. "本当？！").
+# terminators or newlines. Terminators are JA 。！？ plus ASCII ! ? — the
+# ASCII period is intentionally excluded (it appears mid-sentence in
+# abbreviations/decimals far more often than as a JA-text sentence end).
+# Consecutive terminators stay with the sentence they close (e.g. "本当？！").
 _SENTENCE_RE = re.compile(r"[^。！？!?\n]*[。！？!?\n]+")
 
 
