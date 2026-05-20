@@ -34,7 +34,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import Field
@@ -45,6 +45,7 @@ from dimos.core.stream import In, Out
 from dimos.stream.audio.base import AudioEvent
 from dimos.stream.audio.node_microphone import SounddeviceAudioSource
 from dimos.utils.logging_config import setup_logger
+from dimos.agents.vad_segmenter_ja import VadStreamSegmenter
 
 logger = setup_logger()
 
@@ -71,6 +72,13 @@ class LocalMicrophoneJaConfig(ModuleConfig):
         default_factory=lambda: float(os.environ.get(f"{_ENV_PREFIX}MAX_SECONDS", "60"))
     )
 
+    # --- VAD / hold モード切り替え（実行場所非依存 → env seed なし、profile 専管）---
+    mic_mode: Literal["hold", "vad"] = Field(default="hold")
+    vad_threshold: float = Field(default=0.5)
+    vad_min_silence_ms: int = Field(default=700)
+    vad_speech_pad_ms: int = Field(default=300)
+    vad_min_speech_ms: int = Field(default=200)
+
 
 class LocalMicrophoneJa(Module):
     """PTT-driven microphone: buffers while gate open, emits utterance on close."""
@@ -90,23 +98,32 @@ class LocalMicrophoneJa(Module):
         self._buffer: list[AudioEvent] = []
         self._recording = False
         self._recording_started_at = 0.0
+        self._segmenter: VadStreamSegmenter | None = None
 
     @rpc
     def start(self) -> None:
         super().start()
         cfg = self.config
+        if cfg.mic_mode == "vad":
+            # silero ロード後、その窓幅でマイクを開く（1 フレーム = 1 VAD 窓）。
+            self._segmenter = VadStreamSegmenter.from_config(cfg)
+            block_size = self._segmenter.chunk
+        else:
+            block_size = cfg.block_size
         self._mic = SounddeviceAudioSource(
             device_index=cfg.device_index,
             sample_rate=cfg.sample_rate,
-            block_size=cfg.block_size,
+            block_size=block_size,
         )
         self._mic_unsub = self._mic.emit_audio().subscribe(on_next=self._on_audio)
-        self._gate_unsub = self.mic_gate.subscribe(self._on_gate)
+        if cfg.mic_mode != "vad":
+            self._gate_unsub = self.mic_gate.subscribe(self._on_gate)
         logger.info(
-            "LocalMicrophoneJa started (device=%s, sr=%d Hz, block=%d)",
+            "LocalMicrophoneJa started in %s mode (device=%s, sr=%d Hz, block=%d)",
+            cfg.mic_mode,
             cfg.device_index,
             cfg.sample_rate,
-            cfg.block_size,
+            block_size,
         )
 
     @rpc
@@ -121,6 +138,7 @@ class LocalMicrophoneJa(Module):
         with self._lock:
             self._buffer.clear()
             self._recording = False
+        self._segmenter = None
         super().stop()
 
     @rpc
@@ -149,6 +167,15 @@ class LocalMicrophoneJa(Module):
             self._flush()
 
     def _on_audio(self, event: AudioEvent) -> None:
+        if self._segmenter is not None:
+            utterance = self._segmenter.feed(event)
+            if utterance is not None and utterance.data.shape[0] > 0:
+                logger.info(
+                    "VAD: emitting utterance (%d samples)", utterance.data.shape[0]
+                )
+                self.mic_utterance.publish(utterance)
+            return
+        # --- hold モード（既存ロジック）---
         with self._lock:
             if not self._recording:
                 return
