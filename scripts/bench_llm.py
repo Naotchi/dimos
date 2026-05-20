@@ -96,12 +96,24 @@ def fixture_iter(fixtures: list[dict[str, Any]], runs: int, warmup: int, shuffle
             yield {**fx, "run_idx": run_idx, "warmup": run_idx < warmup}
 
 
-def setup_run_dir(cfg: dict[str, Any], cfg_path: Path, config_path: Path, kwargs: dict[str, Any]) -> Path:
-    # Task 5 finalizes the run-record contents (config_path and kwargs are reserved for it).
+def setup_run_dir(
+    cfg: dict[str, Any],
+    cfg_path: Path,
+    config_path: Path,
+    kwargs: dict[str, Any],
+) -> Path:
     ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     out_dir = Path("logs") / f"{ts}-{cfg['name']}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(cfg_path, out_dir / "config.yaml")
+    # Self-describing run record: the bench YAML, the referenced profile
+    # config.json, and the resolved blueprint_args actually passed to build().
+    # The profile .env is NOT copied (no secrets in logs); the endpoint is
+    # captured redacted via run_meta.resolved_endpoint instead.
+    shutil.copy2(cfg_path, out_dir / "bench.yaml")
+    shutil.copy2(config_path, out_dir / "profile_config.json")
+    (out_dir / "resolved_config.json").write_text(
+        json.dumps(kwargs, indent=2, ensure_ascii=False, sort_keys=True)
+    )
     set_run_log_dir(out_dir)
     return out_dir
 

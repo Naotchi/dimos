@@ -35,3 +35,23 @@ def test_redacted_endpoint_omits_api_key(monkeypatch):
     assert ep["model"] == "openai:qwen"
     assert "secret-key" not in str(ep)
     assert "api_key" not in ep
+
+
+def test_setup_run_dir_writes_self_describing_record(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bench_llm, "set_run_log_dir", lambda *_a, **_k: None)
+    cfg_path = tmp_path / "bench.yaml"
+    cfg_path.write_text("name: t\nprofile: p\n")
+    profile_cfg = tmp_path / "config.json"
+    profile_cfg.write_text('{"assistantspeechnodeja": {"impl": "voicevox"}}')
+    cfg = {"name": "t", "profile": "p"}
+    kwargs = {"g": {"simulation": True}, "assistantspeechnodeja": {"impl": "voicevox"}}
+
+    out_dir = bench_llm.setup_run_dir(cfg, cfg_path, profile_cfg, kwargs)
+
+    assert (out_dir / "bench.yaml").exists()
+    assert (out_dir / "profile_config.json").exists()
+    import json as _json
+    loaded = _json.loads((out_dir / "resolved_config.json").read_text())
+    assert loaded == kwargs
+    assert out_dir.resolve().is_relative_to(tmp_path / "logs")
