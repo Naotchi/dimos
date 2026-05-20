@@ -34,6 +34,10 @@ import requests
 import typer
 
 from dimos.agents.mcp.mcp_adapter import McpAdapter, McpError
+from dimos.agents.profile_ja import (
+    apply_profile as _apply_profile,
+    resolve_profile as _resolve_profile,
+)
 from dimos.constants import CONFIG_DIR, LOG_DIR
 from dimos.core.daemon import daemonize, install_signal_handlers
 from dimos.core.global_config import GlobalConfig, global_config
@@ -160,45 +164,6 @@ def arg_help(
             output += f"{indent}* {required}{module}{k}: {display_type}{default}\n"
     return output
 
-
-_PROFILES_ROOT = Path("configs/profiles")
-
-
-def _resolve_profile(name: str) -> tuple[Path | None, Path | None]:
-    """Resolve a profile name to (env_path, config_path).
-
-    Returns paths to .env and config.json under configs/profiles/NAME/.
-    Either may be None if absent. Raises FileNotFoundError if neither
-    exists, ValueError on unsafe names.
-    """
-    if not name or "/" in name or ".." in name or name.startswith("."):
-        raise ValueError(f"Invalid profile name: {name!r}")
-
-    pdir = (_PROFILES_ROOT / name).resolve()
-    env_path = pdir / ".env"
-    config_path = pdir / "config.json"
-
-    env_exists = env_path.is_file()
-    config_exists = config_path.is_file()
-    if not env_exists and not config_exists:
-        raise FileNotFoundError(
-            f"Profile {name!r} not found: neither {env_path} nor {config_path} exists"
-        )
-
-    return (env_path if env_exists else None, config_path if config_exists else None)
-
-
-def _apply_profile(name: str) -> Path | None:
-    """Apply a profile: load its .env with override, return its config.json path.
-
-    The .env (if present) is loaded into process env with override=True so
-    the profile wins over any pre-existing shell variables. Returns the
-    config.json Path if the profile has one, else None.
-    """
-    env_path, config_path = _resolve_profile(name)
-    if env_path is not None:
-        load_dotenv(env_path, override=True)
-    return config_path
 
 
 def load_config_args(config: type[BaseModel], args: Iterable[str], path: Path) -> dict[str, Any]:
