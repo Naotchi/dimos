@@ -39,7 +39,6 @@ from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import In, Out
 from dimos.stream.audio.node_output import SounddeviceAudioOutput
-from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
 from dimos.utils.logging_config import setup_logger
 
@@ -146,11 +145,14 @@ class AssistantSpeechNodeJa(Module):
     def _make_tts_node(self):
         """Construct the TTS node for this run's impl.
 
-        Heavy backends (sbv2/voicevox) are imported lazily so a run that
-        only targets open_jtalk/openai doesn't pay their import cost.
+        Backends with heavy or platform-fragile deps (open_jtalk/sbv2/voicevox)
+        are imported lazily so a run that doesn't target them never pays their
+        import cost. (open_jtalk pulls in pyopenjtalk, whose prebuilt aarch64
+        wheel is numpy-1.x ABI and crashes on import under numpy 2.x.)
         """
         impl = self.config.impl
         if impl == "open_jtalk":
+            from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
             return OpenJTalkTTSNode()
         if impl == "openai":
             return OpenAITTSNode(

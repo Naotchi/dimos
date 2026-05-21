@@ -177,6 +177,11 @@ agents = [
     "openai",
     "sounddevice",
     "faster-whisper>=1.0.0",
+    # openai-whisper as an STT backend on aarch64 (e.g. DGX Spark). faster-whisper's
+    # CTranslate2 has no CUDA aarch64 wheel (CPU-only int8, no float16), so on aarch64
+    # we install openai-whisper, which rides the working torch-CUDA stack for GPU
+    # inference. WhisperNode prefers openai-whisper when present (see node_whisper.py).
+    "openai-whisper; platform_machine == 'aarch64'",
     "silero-vad>=5.1",
     # silero-vad pulls in torchaudio; pin to torch's minor so the prebuilt
     # extension ABI matches the installed torch (2.11 wheels require torch 2.11,
@@ -229,7 +234,7 @@ manipulation = [
 
     # Hardware SDKs
     "piper-sdk",
-    "pyrealsense2; sys_platform != 'darwin'",
+    "pyrealsense2; sys_platform != 'darwin' and platform_machine != 'aarch64'",
     "xarm-python-sdk>=1.17.0",
 
     # Mesh conversion (STL/DAE → OBJ for Drake collision geometry)
@@ -433,6 +438,22 @@ override-dependencies = [
     # (CVE-2026-25990, CVE-2026-40192, CVE-2026-42311).
     "pillow>=12.2.0",
     "pytest==8.3.5", # because gtsam screwed up their dev dependencies
+]
+
+# CUDA-enabled PyTorch wheels for aarch64 Linux (e.g. DGX Spark, GB10 Blackwell).
+# PyPI only ships CPU-only torch for linux_aarch64, so without this redirect
+# `uv sync` resolves torch to the CPU build.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
 ]
 
 [tool.ruff]

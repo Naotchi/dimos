@@ -90,7 +90,16 @@ class UnitreeWebRTCConnection(Resource):
         self.mode = mode
         self.stop_timer: threading.Timer | None = None
         self.cmd_vel_timeout = 0.2
-        self.conn = LegionConnection(WebRTCConnectionMethod.LocalSTA, ip=self.ip)
+        # 192.168.12.1 is the Go2's fixed gateway when the PC joins the robot's
+        # own WiFi hotspot (AP mode). AP and STA send different WebRTC signaling
+        # (LocalAP uses id="", LocalSTA uses id="STA_localNetwork"); using the
+        # wrong one fails the handshake even though the IP pings. Auto-select by IP.
+        method = (
+            WebRTCConnectionMethod.LocalAP
+            if self.ip == "192.168.12.1"
+            else WebRTCConnectionMethod.LocalSTA
+        )
+        self.conn = LegionConnection(method, ip=self.ip)
         self.connect()
 
     def connect(self) -> None:
