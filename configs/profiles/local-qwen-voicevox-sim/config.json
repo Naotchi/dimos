@@ -5,6 +5,9 @@
   "rerunbridgemodule": {
     "memory_limit": "4GB"
   },
+  "localmicrophoneja": {
+    "mic_mode": "vad"
+  },
   "whisperhumaninputja": {
     "model": "large-v3",
     "fp16": true
