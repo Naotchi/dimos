@@ -1,9 +1,6 @@
 {
-  "g": {
-    "simulation": true
-  },
   "rerunbridgemodule": {
-    "memory_limit": "4GB"
+    "memory_limit": "25%"
   },
   "localmicrophoneja": {
     "mic_mode": "vad"
@@ -13,7 +10,7 @@
     "fp16": true
   },
   "timedmcpclient": {
-    "model": "openai:qwen/qwen3.6-35b-a3b"
+    "model": "openai:qwen/qwen3-30b-a3b-2507"
   },
   "assistantspeechnodeja": {
     "impl": "voicevox",
