@@ -12,54 +12,65 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Resolve and apply named profiles under ``configs/profiles/<name>/``.
+"""Resolve and apply named profiles at ``configs/profiles/<name>.json``.
 
-A profile bundles ``.env`` (deploy-dependent secrets/endpoints, category B/C)
-and ``config.json`` (module parameters = blueprint_args, category A). Both
-``dimos run --profile`` and the bench runner share this loader so they boot
-with the identical env + config resolution path.
+A profile is a single committed JSON file holding module parameters
+(category A blueprint_args) including ``timedmcpclient.endpoint``
+(``"local"`` | ``"cloud"``). Endpoint credentials are NOT in the profile;
+they live in the root ``.env`` as ``DIMOS_LLM_{LOCAL,CLOUD}_{BASE_URL,API_KEY}``.
+
+``apply_profile`` reads the selected endpoint and copies the matching pair
+into the generic ``DIMOS_LLM_BASE_URL`` / ``DIMOS_LLM_API_KEY`` that
+``mirror_llm_endpoint_env()`` mirrors into ``OPENAI_*`` at blueprint import.
+The caller is responsible for having loaded the root ``.env`` first (the CLI
+does this at ``dimos.py`` import; the bench calls ``load_dotenv()`` itself).
 """
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
-
-from dotenv import load_dotenv
 
 PROFILES_ROOT = Path("configs/profiles")
 
 
-def resolve_profile(name: str) -> tuple[Path | None, Path | None]:
-    """Resolve a profile name to (env_path, config_path).
+def resolve_profile(name: str) -> Path:
+    """Resolve a profile name to ``configs/profiles/<name>.json``.
 
-    Either may be None if absent. Raises FileNotFoundError if neither
-    exists, ValueError on unsafe names.
+    Raises ValueError on unsafe names, FileNotFoundError if absent.
     """
     if not name or "/" in name or ".." in name or name.startswith("."):
         raise ValueError(f"Invalid profile name: {name!r}")
 
-    pdir = (PROFILES_ROOT / name).resolve()
-    env_path = pdir / ".env"
-    config_path = pdir / "config.json"
-
-    env_exists = env_path.is_file()
-    config_exists = config_path.is_file()
-    if not env_exists and not config_exists:
-        raise FileNotFoundError(
-            f"Profile {name!r} not found: neither {env_path} nor {config_path} exists"
-        )
-
-    return (env_path if env_exists else None, config_path if config_exists else None)
+    path = (PROFILES_ROOT / f"{name}.json").resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Profile {name!r} not found: {path} does not exist")
+    return path
 
 
-def apply_profile(name: str) -> Path | None:
-    """Apply a profile: load its .env with override, return its config.json path.
+def apply_profile(name: str) -> Path:
+    """Apply a profile: select the LLM endpoint env, return its config path.
 
-    The .env (if present) is loaded into process env with override=True so
-    the profile wins over any pre-existing shell variables. Returns the
-    config.json Path if the profile has one, else None.
+    Reads ``timedmcpclient.endpoint`` (default ``"local"``) and copies the
+    matching ``DIMOS_LLM_<ENDPOINT>_{BASE_URL,API_KEY}`` pair into the generic
+    ``DIMOS_LLM_{BASE_URL,API_KEY}``. The profile carries no secrets.
     """
-    env_path, config_path = resolve_profile(name)
-    if env_path is not None:
-        load_dotenv(env_path, override=True)
+    config_path = resolve_profile(name)
+    cfg = json.loads(config_path.read_text())
+    endpoint = cfg.get("timedmcpclient", {}).get("endpoint", "local")
+    _select_endpoint_env(endpoint)
     return config_path
+
+
+def _select_endpoint_env(endpoint: str) -> None:
+    """Copy ``DIMOS_LLM_<ENDPOINT>_{BASE_URL,API_KEY}`` → ``DIMOS_LLM_{...}``.
+
+    Only copies a value when the source var is set, so an unfilled root ``.env``
+    leaves the generic vars untouched (mirror then uses the OpenAI default).
+    """
+    prefix = f"DIMOS_LLM_{endpoint.upper()}_"
+    for suffix in ("BASE_URL", "API_KEY"):
+        val = os.environ.get(prefix + suffix)
+        if val is not None:
+            os.environ[f"DIMOS_LLM_{suffix}"] = val
