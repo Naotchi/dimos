@@ -20,6 +20,7 @@ schema is identical across the *_ja.py files (turn_id, t, event_kind).
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -27,13 +28,29 @@ from langchain_core.messages.base import BaseMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
 
+from pydantic import Field
+
 from dimos.agents.bench_ja import log_bench_event
 from dimos.agents.bench_ja.llm_usage import extract_usage
 from dimos.agents.bench_ja.stream_tracker import StepFirstTokenTracker
-from dimos.agents.mcp.mcp_client import McpClient
+from dimos.agents.llm_env_ja import DEFAULT_MODEL
+from dimos.agents.mcp.mcp_client import McpClient, McpClientConfig
 from dimos.agents.utils import pretty_print_langchain_message
 from dimos.core.stream import Out
 from dimos.stream.audio.tts.sentence_stream import SentenceAccumulator
+
+
+class TimedMcpClientConfig(McpClientConfig):
+    """Fork-local config: ``model`` becomes a category-A field seeded from env.
+
+    Precedence: ``profile config.json value > DIMOS_LLM_MODEL env seed > "gpt-4o"``.
+    The blueprint no longer bakes the model, so the profile config.json is the
+    sole writer and there is no blueprint↔profile collision to resolve.
+    """
+
+    model: str = Field(
+        default_factory=lambda: os.environ.get("DIMOS_LLM_MODEL", DEFAULT_MODEL)
+    )
 
 
 class TimedMcpClient(McpClient):
@@ -48,6 +65,7 @@ class TimedMcpClient(McpClient):
       - turn_done       : total turn time, llm time, step count, tool call count
     """
 
+    config: TimedMcpClientConfig
     agent_text: Out[str]
 
     # Tools whose result is an *image artefact*. The base ``McpClient`` cannot
@@ -183,4 +201,4 @@ class TimedMcpClient(McpClient):
             self.agent_idle.publish(True)
 
 
-__all__ = ["TimedMcpClient"]
+__all__ = ["TimedMcpClient", "TimedMcpClientConfig"]
