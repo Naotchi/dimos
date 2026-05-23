@@ -37,6 +37,9 @@ def test_apply_real_profile_selects_endpoint(monkeypatch):
     # 実プロファイル + loader の結合: endpoint 値で LOCAL/CLOUD が切り替わる。
     from dimos.agents import profile_ja
 
+    monkeypatch.delenv("DIMOS_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("DIMOS_LLM_API_KEY", raising=False)
+
     monkeypatch.setenv("DIMOS_LLM_LOCAL_BASE_URL", "http://L/v1")
     monkeypatch.setenv("DIMOS_LLM_CLOUD_BASE_URL", "http://C/v1")
 
