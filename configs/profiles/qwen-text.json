@@ -1,0 +1,7 @@
+{
+  "rerunbridgemodule": { "memory_limit": "25%" },
+  "localmicrophoneja": { "mic_mode": "vad" },
+  "whisperhumaninputja": { "model": "large-v3", "fp16": true },
+  "timedmcpclient": { "model": "openai:qwen/qwen3-30b-a3b-2507", "endpoint": "local" },
+  "assistantspeechnodeja": { "impl": "voicevox", "streaming": true }
+}
