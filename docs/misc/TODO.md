@@ -100,3 +100,4 @@
   等で単一応答化）のが本質的な直し方になります。
 - 物体検知するとき、rerun viewerにbbを表示してほしい
 - そろそろupstreamを取り込まないと
+- blueprintとprofileとenvの責務分離
