@@ -34,7 +34,7 @@ choice. Upstream files are not modified; all fork-specific wiring is in
 ``*_ja`` helpers.
 """
 
-from dimos.agents.llm_env_ja import resolve_llm_model
+from dimos.agents.llm_env_ja import mirror_llm_endpoint_env
 from dimos.agents.mcp.mcp_client_ja import TimedMcpClient
 from dimos.agents.mcp.mcp_server import McpServer
 from dimos.agents.system_prompt_ja import SYSTEM_PROMPT_JA
@@ -45,9 +45,11 @@ from dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial_bounded import
     unitree_go2_spatial_bounded,
 )
 
-# LLM endpoint switching: DIMOS_LLM_MODEL / DIMOS_LLM_BASE_URL / DIMOS_LLM_API_KEY.
-# See dimos/agents/llm_env_ja.py for the full env contract.
-_LLM_MODEL = resolve_llm_model()
+# LLM endpoint wiring: DIMOS_LLM_BASE_URL / DIMOS_LLM_API_KEY → OPENAI_*.
+# Called at import (main process, after apply_profile, before worker fork).
+# The model string is owned by the profile config.json (TimedMcpClientConfig),
+# not baked here. See dimos/agents/llm_env_ja.py.
+mirror_llm_endpoint_env()
 
 # SecurityModule は spatial_bounded に含まれるが SpeakSkillSpec satisfier を
 # 必要とする。local-tts では LLM 応答テキストを直接 TTS に流す方針なので、
@@ -55,7 +57,7 @@ _LLM_MODEL = resolve_llm_model()
 unitree_go2_agentic_local_tts = autoconnect(
     unitree_go2_spatial_bounded,
     McpServer.blueprint(),
-    TimedMcpClient.blueprint(model=_LLM_MODEL, system_prompt=SYSTEM_PROMPT_JA),
+    TimedMcpClient.blueprint(system_prompt=SYSTEM_PROMPT_JA),
     _common_agentic_ja,
 ).disabled_modules(SecurityModule)
 
