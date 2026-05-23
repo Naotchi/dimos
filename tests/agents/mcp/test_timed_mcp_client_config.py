@@ -1,4 +1,8 @@
-"""TimedMcpClientConfig.model is a category-A field: explicit > env seed > default."""
+"""TimedMcpClientConfig: both ``model`` and ``endpoint`` are category-A fields.
+
+``model``: explicit > DIMOS_LLM_MODEL env seed > default ("gpt-4o").
+``endpoint``: selects the root-.env endpoint pair ("local" | "cloud"); defaults to "local".
+"""
 
 
 def test_model_seeded_from_env(monkeypatch):

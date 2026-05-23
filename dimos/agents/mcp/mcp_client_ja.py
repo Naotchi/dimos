@@ -41,11 +41,16 @@ from dimos.stream.audio.tts.sentence_stream import SentenceAccumulator
 
 
 class TimedMcpClientConfig(McpClientConfig):
-    """Fork-local config: ``model`` becomes a category-A field seeded from env.
+    """Fork-local config: ``model`` and ``endpoint`` are category-A fields.
 
-    Precedence: ``profile config.json value > DIMOS_LLM_MODEL env seed > "gpt-4o"``.
+    ``model`` precedence: ``profile config.json value > DIMOS_LLM_MODEL env seed > "gpt-4o"``.
     The blueprint no longer bakes the model, so the profile config.json is the
     sole writer and there is no blueprint↔profile collision to resolve.
+
+    ``endpoint`` selects which root-``.env`` endpoint pair to activate
+    (``"local"`` | ``"cloud"``); ``profile_ja.apply_profile`` reads this value
+    and copies ``DIMOS_LLM_<ENDPOINT>_{BASE_URL,API_KEY}`` →
+    ``DIMOS_LLM_{BASE_URL,API_KEY}``.  Defaults to ``"local"``.
     """
 
     model: str = Field(
