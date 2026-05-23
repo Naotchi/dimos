@@ -7,8 +7,8 @@ profile (``configs/profiles/<name>/config.json``), injects fixture wavs via
 ``logs/{ts}-{config.name}/main.jsonl``.
 
 The bench YAML references a profile name; ``apply_profile`` loads the profile
-``.env`` before the blueprint is imported so that ``resolve_llm_model()`` (which
-runs at blueprint import time) sees the correct ``DIMOS_LLM_*`` values.
+``.env`` before the blueprint is imported so that the blueprint's module-level
+``mirror_llm_endpoint_env()`` sees the correct ``DIMOS_LLM_*`` values.
 
 For headless MuJoCo runs, invoke under ``xvfb-run`` on Linux:
 
@@ -43,8 +43,8 @@ from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.utils.logging_config import set_run_log_dir
 
 # NOTE: dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts
-# is intentionally NOT imported here. It calls resolve_llm_model() at module load,
-# which reads DIMOS_LLM_* env vars. Import is deferred to main() AFTER apply_profile().
+# is intentionally NOT imported here. It calls mirror_llm_endpoint_env() at module load,
+# which reads DIMOS_LLM_* env. Import is deferred to main() AFTER apply_profile().
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,7 +69,7 @@ def config_hash(cfg: dict[str, Any]) -> str:
 def redacted_endpoint(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Capture the resolved LLM endpoint for the run record, minus secrets.
 
-    ``resolve_llm_model`` (fired at blueprint import after ``apply_profile``)
+    ``mirror_llm_endpoint_env`` (fired at blueprint import after ``apply_profile``)
     mirrors the profile's DIMOS_LLM_* into OPENAI_*. We record base_url + model
     so the run is self-describing; the api_key is intentionally never logged.
     """
@@ -139,7 +139,7 @@ def main() -> int:
     cfg = load_config(cfg_path)
 
     # Load the profile .env BEFORE importing the blueprint: the blueprint module
-    # calls resolve_llm_model() at import time, which reads DIMOS_LLM_* and
+    # calls mirror_llm_endpoint_env() at import time, which reads DIMOS_LLM_* and
     # mirrors them into OPENAI_*. Importing earlier would miss the profile env.
     config_path = apply_profile(cfg["profile"])
     from dimos.robot.cli.dimos import load_config_args
@@ -150,6 +150,9 @@ def main() -> int:
     if config_path is None:
         raise ValueError(f"profile {cfg['profile']!r} has no config.json")
     kwargs = load_config_args(blueprint.config(), [], config_path)
+    # Run-mode is an invocation parameter, not a profile concern (Spec §2).
+    # The bench YAML carries `simulation:` so the run stays reproducible.
+    kwargs.setdefault("g", {})["simulation"] = bool(cfg.get("simulation", False))
 
     os.environ.setdefault("MUJOCO_GL", "egl")
     warn_if_no_display_for_sim(cfg, kwargs)
