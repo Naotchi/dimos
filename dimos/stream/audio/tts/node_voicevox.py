@@ -15,9 +15,7 @@
 
 """Neural Japanese TTS node backed by the VOICEVOX engine HTTP API.
 
-Mirrors ``StyleBertVits2TTSNode``'s interface so call sites only need an
-import swap. Talks to a VOICEVOX engine over HTTP (default
-``http://127.0.0.1:50021``).
+Talks to a VOICEVOX engine over HTTP (default ``http://127.0.0.1:50021``).
 
 Synthesis params (speaker_id / *_scale) are passed in by the caller.
 The Config seed for those values lives in

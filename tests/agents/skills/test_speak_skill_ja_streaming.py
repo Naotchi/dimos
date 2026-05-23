@@ -37,14 +37,14 @@ def test_streaming_ignores_env(monkeypatch):
 
 
 def test_select_input_streaming_uses_agent_text():
-    node = AssistantSpeechNodeJa(impl="open_jtalk", streaming=True)
+    node = AssistantSpeechNodeJa(impl="voicevox", streaming=True)
     stream, cb = node._select_input()
     assert stream is node.agent_text
     assert cb == node._on_agent_text
 
 
 def test_select_input_non_streaming_uses_agent():
-    node = AssistantSpeechNodeJa(impl="open_jtalk", streaming=False)
+    node = AssistantSpeechNodeJa(impl="voicevox", streaming=False)
     stream, cb = node._select_input()
     assert stream is node.agent
     assert cb == node._on_agent_message

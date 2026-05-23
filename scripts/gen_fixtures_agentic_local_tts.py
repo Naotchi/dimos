@@ -1,8 +1,16 @@
 #!/usr/bin/env python
-"""Generate 16 kHz mono WAV fixtures from fixtures.yaml using pyopenjtalk.
+"""Generate 16 kHz mono WAV fixtures from fixtures.yaml using VOICEVOX.
 
-Idempotent: skips entries whose target wav already exists. Run after editing
-`text` fields in fixtures.yaml.
+Synthesizes each entry's ``text`` via a running VOICEVOX engine (HTTP), then
+resamples to 16 kHz mono and writes the WAV. Idempotent: skips entries whose
+target wav already exists. Run after editing `text` fields in fixtures.yaml.
+
+Requires a reachable VOICEVOX engine, e.g.:
+    docker run --rm -p 50021:50021 voicevox/voicevox_engine:cpu-ubuntu22.04-latest
+
+Env:
+    DIMOS_VOICEVOX_URL          base URL (default http://127.0.0.1:50021)
+    DIMOS_VOICEVOX_SPEAKER_ID   speaker id (default 74)
 
 Usage:
     python scripts/gen_fixtures_agentic_local_tts.py
@@ -10,24 +18,58 @@ Usage:
 
 from __future__ import annotations
 
+import io
+import os
 import sys
 import wave
 from math import gcd
 from pathlib import Path
 
 import numpy as np
-import pyopenjtalk
+import requests
 import yaml
 from scipy.signal import resample_poly
 
 FIXTURE_DIR = Path("tests/bench_fixtures/agentic_ja")
 TARGET_SR = 16000
 
+VOICEVOX_URL = os.environ.get("DIMOS_VOICEVOX_URL", "http://127.0.0.1:50021").rstrip("/")
+SPEAKER_ID = int(os.environ.get("DIMOS_VOICEVOX_SPEAKER_ID", "74"))
+HTTP_TIMEOUT = 30.0
+
+
+def _voicevox_wav(text: str) -> bytes:
+    """Synthesize ``text`` via VOICEVOX (audio_query -> synthesis), return WAV bytes."""
+    q = requests.post(
+        f"{VOICEVOX_URL}/audio_query",
+        params={"text": text, "speaker": SPEAKER_ID},
+        timeout=HTTP_TIMEOUT,
+    )
+    q.raise_for_status()
+    s = requests.post(
+        f"{VOICEVOX_URL}/synthesis",
+        params={"speaker": SPEAKER_ID},
+        json=q.json(),
+        timeout=HTTP_TIMEOUT,
+    )
+    s.raise_for_status()
+    return s.content
+
 
 def synth_to_wav(text: str, out_path: Path) -> None:
-    """Synthesize `text` with pyopenjtalk, resample to 16kHz mono, write WAV."""
-    audio, src_sr = pyopenjtalk.tts(text)
-    audio = np.asarray(audio, dtype=np.float64)
+    """Synthesize `text` with VOICEVOX, resample to 16kHz mono, write WAV."""
+    with wave.open(io.BytesIO(_voicevox_wav(text))) as wf:
+        src_sr = wf.getframerate()
+        channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        pcm = wf.readframes(wf.getnframes())
+
+    if sampwidth != 2:
+        raise RuntimeError(f"VOICEVOX returned unexpected sample width: {sampwidth} bytes")
+
+    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float64)
+    if channels > 1:  # downmix to mono
+        audio = audio.reshape(-1, channels).mean(axis=1)
 
     if src_sr != TARGET_SR:
         g = gcd(int(src_sr), TARGET_SR)

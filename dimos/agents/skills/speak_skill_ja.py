@@ -16,7 +16,7 @@
 
 Subscribes to ``McpClient.agent: Out[BaseMessage]`` (autoconnect wires by
 ``(name, type)``) and feeds the text content of each ``AIMessage`` into a
-TTS node selected by ``impl`` (default ``sbv2``). The audio sink is opened
+TTS node selected by ``impl`` (default ``voicevox``). The audio sink is opened
 at the node's native sample rate so the speak path never resamples.
 """
 
@@ -45,15 +45,14 @@ from dimos.utils.logging_config import setup_logger
 logger = setup_logger()
 
 # Static sample rates for nodes that don't expose `self.sample_rate`.
-# OpenJTalk's module-level SAMPLE_RATE constant is 48000; OpenAI TTS
-# returns 24 kHz audio (see node_openai.py's __main__ example).
+# OpenAI TTS returns 24 kHz audio (see node_openai.py's __main__ example);
+# voicevox sets `self.sample_rate` itself, so it never falls back here.
 _STATIC_SAMPLE_RATE: dict[str, int] = {
-    "open_jtalk": 48000,
     "openai": 24000,
 }
 
 
-TtsImpl = Literal["open_jtalk", "sbv2", "voicevox", "openai"]
+TtsImpl = Literal["voicevox", "openai"]
 
 # DIMOS_TTS_BACKEND seeds the `impl` default for interactive runs. Bench /
 # YAML / explicit `AssistantSpeechNodeJaConfig(impl=...)` always wins — the
@@ -61,7 +60,7 @@ TtsImpl = Literal["open_jtalk", "sbv2", "voicevox", "openai"]
 def _default_tts_impl() -> TtsImpl:
     raw = os.environ.get("DIMOS_TTS_BACKEND")
     if raw is None:
-        return "sbv2"
+        return "voicevox"
     valid = get_args(TtsImpl)
     if raw not in valid:
         raise ValueError(
@@ -90,44 +89,11 @@ class VoicevoxParamsConfig(ModuleConfig):
     )
 
 
-class Sbv2ParamsConfig(ModuleConfig):
-    """Style-Bert-VITS2 synthesis params (category A)."""
-
-    speaker_id: int = Field(
-        default_factory=lambda: int(os.environ.get("DIMOS_SBV2_SPEAKER_ID", "0"))
-    )
-    style: str = Field(
-        default_factory=lambda: os.environ.get("DIMOS_SBV2_STYLE", "Neutral")
-    )
-    style_weight: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_STYLE_WEIGHT", "1.0"))
-    )
-    sdp_ratio: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_SDP_RATIO", "0.15"))
-    )
-    noise: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_NOISE", "0.4"))
-    )
-    noise_w: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_NOISE_W", "0.6"))
-    )
-    length: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_LENGTH", "1.1"))
-    )
-    pitch_scale: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_PITCH_SCALE", "1.08"))
-    )
-    intonation_scale: float = Field(
-        default_factory=lambda: float(os.environ.get("DIMOS_SBV2_INTONATION_SCALE", "0.85"))
-    )
-
-
 class AssistantSpeechNodeJaConfig(ModuleConfig):
     """Config selecting the underlying TTS implementation."""
 
     impl: TtsImpl = Field(default_factory=_default_tts_impl)
     voicevox: VoicevoxParamsConfig = Field(default_factory=VoicevoxParamsConfig)
-    sbv2: Sbv2ParamsConfig = Field(default_factory=Sbv2ParamsConfig)
     openai_voice: Voice = Voice.ECHO  # used when impl == "openai"
     openai_model: str = "tts-1"  # used when impl == "openai"
     idle_grace_s: float = 1.0  # silence-watchdog tail after last chunk's playback end
@@ -145,35 +111,14 @@ class AssistantSpeechNodeJa(Module):
     def _make_tts_node(self):
         """Construct the TTS node for this run's impl.
 
-        Backends with heavy or platform-fragile deps (open_jtalk/sbv2/voicevox)
-        are imported lazily so a run that doesn't target them never pays their
-        import cost. (open_jtalk pulls in pyopenjtalk, whose prebuilt aarch64
-        wheel is numpy-1.x ABI and crashes on import under numpy 2.x.)
+        The voicevox backend is imported lazily so a run that targets openai
+        never pays its import cost (and vice versa).
         """
         impl = self.config.impl
-        if impl == "open_jtalk":
-            from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
-            return OpenJTalkTTSNode()
         if impl == "openai":
             return OpenAITTSNode(
                 voice=self.config.openai_voice,
                 model=self.config.openai_model,
-            )
-        if impl == "sbv2":
-            from dimos.stream.audio.tts.node_style_bert_vits2 import (
-                StyleBertVits2TTSNode,
-            )
-            s = self.config.sbv2
-            return StyleBertVits2TTSNode(
-                speaker_id=s.speaker_id,
-                style=s.style,
-                style_weight=s.style_weight,
-                sdp_ratio=s.sdp_ratio,
-                noise=s.noise,
-                noise_w=s.noise_w,
-                length=s.length,
-                pitch_scale=s.pitch_scale,
-                intonation_scale=s.intonation_scale,
             )
         if impl == "voicevox":
             from dimos.stream.audio.tts.node_voicevox import VoicevoxTTSNode
@@ -190,8 +135,8 @@ class AssistantSpeechNodeJa(Module):
     def _sample_rate_for(self, node: Any) -> int:
         """Resolve the playback sample rate for ``node``.
 
-        sbv2/voicevox set ``self.sample_rate``; open_jtalk/openai don't,
-        so fall back to a static per-impl rate.
+        voicevox sets ``self.sample_rate``; openai doesn't, so fall back to
+        a static per-impl rate.
         """
         sr = getattr(node, "sample_rate", None)
         if sr is not None:
@@ -349,6 +294,5 @@ class AssistantSpeechNodeJa(Module):
 __all__ = [
     "AssistantSpeechNodeJa",
     "AssistantSpeechNodeJaConfig",
-    "Sbv2ParamsConfig",
     "VoicevoxParamsConfig",
 ]

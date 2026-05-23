@@ -23,7 +23,6 @@ from dimos.agents.skills.speak_skill_ja import (
     AssistantSpeechNodeJa,
     AssistantSpeechNodeJaConfig,
 )
-from dimos.stream.audio.tts.node_open_jtalk import OpenJTalkTTSNode
 from dimos.stream.audio.tts.node_openai import OpenAITTSNode, Voice
 
 
@@ -32,16 +31,10 @@ def _build_node(impl: str, **extra) -> AssistantSpeechNodeJa:
     return AssistantSpeechNodeJa(impl=impl, **extra)
 
 
-def test_default_impl_is_sbv2(monkeypatch):
+def test_default_impl_is_voicevox(monkeypatch):
     monkeypatch.delenv("DIMOS_TTS_BACKEND", raising=False)
     cfg = AssistantSpeechNodeJaConfig()
-    assert cfg.impl == "sbv2"
-
-
-def test_impl_open_jtalk_returns_open_jtalk_node():
-    node = _build_node(impl="open_jtalk")
-    tts = node._make_tts_node()
-    assert isinstance(tts, OpenJTalkTTSNode)
+    assert cfg.impl == "voicevox"
 
 
 def test_impl_openai_returns_openai_node(monkeypatch):
@@ -51,20 +44,6 @@ def test_impl_openai_returns_openai_node(monkeypatch):
     assert isinstance(tts, OpenAITTSNode)
     assert tts.voice == Voice.ECHO
     assert tts.model == "tts-1"
-
-
-def test_impl_sbv2_routes_to_sbv2_module(monkeypatch):
-    """Dispatch picks the sbv2 module without actually loading the model.
-
-    sbv2 instantiation pulls a HuggingFace model on first use; replace the
-    constructor with a sentinel so the test verifies routing only.
-    """
-    sentinel = object()
-    import dimos.stream.audio.tts.node_style_bert_vits2 as sbv2_mod
-
-    monkeypatch.setattr(sbv2_mod, "StyleBertVits2TTSNode", lambda **kw: sentinel)
-    node = _build_node(impl="sbv2")
-    assert node._make_tts_node() is sentinel
 
 
 def test_impl_voicevox_routes_to_voicevox_module(monkeypatch):

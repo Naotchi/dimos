@@ -26,14 +26,16 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 @pytest.fixture
 def node(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Construct AssistantSpeechNodeJa with TTS / audio output mocked."""
-    fake_tts = MagicMock(name="OpenJTalkTTSNode_instance")
+    fake_tts = MagicMock(name="VoicevoxTTSNode_instance")
+    fake_tts.sample_rate = 24000  # real int so _sample_rate_for doesn't int(MagicMock)
     fake_tts.emit_audio.return_value = MagicMock(name="audio_observable")
     fake_audio = MagicMock(name="SounddeviceAudioOutput_instance")
 
-    monkeypatch.setattr(
-        "dimos.agents.skills.speak_skill_ja.OpenJTalkTTSNode",
-        lambda *a, **kw: fake_tts,
-    )
+    # impl defaults to "voicevox"; patch the lazily-imported node at its source
+    # module so dispatch returns the mock without contacting a VOICEVOX engine.
+    import dimos.stream.audio.tts.node_voicevox as vv_mod
+
+    monkeypatch.setattr(vv_mod, "VoicevoxTTSNode", lambda *a, **kw: fake_tts)
     monkeypatch.setattr(
         "dimos.agents.skills.speak_skill_ja.SounddeviceAudioOutput",
         lambda *a, **kw: fake_audio,
