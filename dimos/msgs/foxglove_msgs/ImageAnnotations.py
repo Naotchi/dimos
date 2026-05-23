@@ -18,6 +18,14 @@ from dimos_lcm.foxglove_msgs.ImageAnnotations import (
 
 
 class ImageAnnotations(FoxgloveImageAnnotations):  # type: ignore[misc]
+    # The generated LCM decoder reads ``cls.__annotations__`` in
+    # ``_get_field_type`` and does not walk the MRO, so a subclass that adds no
+    # annotated fields would have an empty ``__annotations__`` and decode array
+    # fields (points/texts/circles) as ``None`` → "'NoneType' object has no
+    # attribute '_decode_one'". Inherit the base's field annotations so this
+    # wrapper decodes identically to ``FoxgloveImageAnnotations``.
+    __annotations__ = dict(FoxgloveImageAnnotations.__annotations__)
+
     def __add__(self, other: "ImageAnnotations") -> "ImageAnnotations":
         points = self.points + other.points
         texts = self.texts + other.texts

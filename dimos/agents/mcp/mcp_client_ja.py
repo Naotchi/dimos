@@ -24,6 +24,7 @@ import time
 from typing import Any
 
 from langchain_core.messages.base import BaseMessage
+from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
 
 from dimos.agents.bench_ja import log_bench_event
@@ -48,6 +49,31 @@ class TimedMcpClient(McpClient):
     """
 
     agent_text: Out[str]
+
+    # Tools whose result is an *image artefact*. The base ``McpClient`` cannot
+    # put an image inside the tool response (OpenAI-compatible chat APIs reject
+    # images in the tool role), so ``call_tool`` returns only a placeholder
+    # ("Tool call started with UUID… updated soon") and injects the image as a
+    # *separate* HumanMessage on the message queue → a second graph run.
+    #
+    # Without intervention the placeholder turn still runs the model, which then
+    # answers from whatever image is already in history — i.e. the *previous*
+    # observe artefact — and that stale answer gets spoken before the real image
+    # arrives (the "called twice, first has the previous image" symptom).
+    #
+    # Marking these tools ``return_direct`` makes ``create_agent`` exit the graph
+    # right after the tool node (langchain.agents.factory: "exit when all
+    # executed tools have return_direct=True"), so no model answer is produced on
+    # the placeholder turn. The single answer comes from the follow-up turn that
+    # carries the fresh image. The placeholder is a ToolMessage, so the speak
+    # node (AIMessage-only) never voices it.
+    RETURN_DIRECT_TOOLS: frozenset[str] = frozenset({"observe"})
+
+    def _mcp_tool_to_langchain(self, mcp_tool: dict[str, Any]) -> StructuredTool:
+        tool = super()._mcp_tool_to_langchain(mcp_tool)
+        if tool.name in self.RETURN_DIRECT_TOOLS:
+            tool.return_direct = True
+        return tool
 
     def _process_message(
         self, state_graph: CompiledStateGraph[Any, Any, Any, Any], message: BaseMessage
