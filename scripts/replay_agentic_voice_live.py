@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--simulation",
         action="store_true",
-        help="Run blueprint against MuJoCo (sets global_config.simulation=True).",
+        help='Run blueprint against MuJoCo (sets global_config.simulation="mujoco").',
     )
     p.add_argument("--turn-timeout", type=float, default=30.0)
     p.add_argument("--initial-idle-timeout", type=float, default=60.0)
@@ -205,7 +205,7 @@ class IdleSettleWaiter:
 def main() -> int:
     args = parse_args()
     if args.simulation:
-        global_config.update(simulation=True)
+        global_config.update(simulation="mujoco")
     out_dir = configure_log_dir(args.out)
     print(
         f"[replay] logging to {out_dir} (connection={global_config.unitree_connection_type})",

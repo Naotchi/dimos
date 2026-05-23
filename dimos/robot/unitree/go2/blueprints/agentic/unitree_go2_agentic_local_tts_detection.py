@@ -17,9 +17,14 @@
 
 Combines the Japanese local-TTS agentic stack
 (:mod:`unitree_go2_agentic_local_tts`) with the ``Detection3DModule`` wiring
-lifted verbatim from :mod:`unitree_go2_detection` — same ``global_map``
-pointcloud remapping and the same LCM transports for detections / annotations
-/ scene update / per-detection pointclouds + images.
+lifted from :mod:`unitree_go2_detection` — same ``global_map`` pointcloud
+remapping and LCM transports for detections / per-detection pointclouds +
+images.
+
+Note: upstream removed Foxglove viewer support (DIM-877), dropping the
+``annotations`` (ImageAnnotations) and ``scene_update`` (SceneUpdate) output
+ports from ``Detection3DModule``, so those transports are no longer wired here.
+Detection bounding boxes are now visualized rerun-natively via the viewer.
 
 ``Detection3DModule`` is added on top of the prebuilt agentic blueprint, so the
 shared ``unitree_go2`` base is deduplicated by ``autoconnect``. The agentic
@@ -27,11 +32,6 @@ blueprint disables ``SecurityModule`` (no SpeakSkill satisfier in the
 local-TTS path); ``autoconnect`` does not carry that flag across composition,
 so it is re-applied here.
 """
-
-from dimos_lcm.foxglove_msgs.ImageAnnotations import (
-    ImageAnnotations,
-)
-from dimos_lcm.foxglove_msgs.SceneUpdate import SceneUpdate
 
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
@@ -62,12 +62,6 @@ unitree_go2_agentic_local_tts_detection = (
             # Detection 3D module outputs
             ("detections", Detection3DModule): LCMTransport(
                 "/detector3d/detections", Detection2DArray
-            ),
-            ("annotations", Detection3DModule): LCMTransport(
-                "/detector3d/annotations", ImageAnnotations
-            ),
-            ("scene_update", Detection3DModule): LCMTransport(
-                "/detector3d/scene_update", SceneUpdate
             ),
             ("detected_pointcloud_0", Detection3DModule): LCMTransport(
                 "/detector3d/pointcloud/0", PointCloud2
