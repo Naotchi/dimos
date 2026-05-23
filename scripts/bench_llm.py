@@ -2,7 +2,7 @@
 """Config-driven LLM/STT/TTS bench runner.
 
 Boots ``unitree_go2_agentic_local_tts`` with module configs resolved from a
-profile (``configs/profiles/<name>/config.json``), injects fixture wavs via
+profile (``configs/profiles/<name>.json``), injects fixture wavs via
 ``LocalMicrophoneJa.inject_utterance``, and writes bench events to
 ``logs/{ts}-{config.name}/main.jsonl``.
 
@@ -108,9 +108,10 @@ def setup_run_dir(
     out_dir = Path("logs") / f"{ts}-{cfg['name']}"
     out_dir.mkdir(parents=True, exist_ok=True)
     # Self-describing run record: the bench YAML, the referenced profile
-    # config.json, and the resolved blueprint_args actually passed to build().
-    # The profile .env is NOT copied (no secrets in logs); the endpoint is
-    # captured redacted via run_meta.resolved_endpoint instead.
+    # JSON, and the resolved blueprint_args actually passed to build().
+    # No secrets are logged — endpoint creds live in the root .env, never in
+    # the profile; the endpoint is captured redacted via
+    # run_meta.resolved_endpoint instead.
     shutil.copy2(cfg_path, out_dir / "bench.yaml")
     shutil.copy2(config_path, out_dir / "profile_config.json")
     (out_dir / "resolved_config.json").write_text(
