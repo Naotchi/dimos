@@ -6,9 +6,11 @@ profile (``configs/profiles/<name>/config.json``), injects fixture wavs via
 ``LocalMicrophoneJa.inject_utterance``, and writes bench events to
 ``logs/{ts}-{config.name}/main.jsonl``.
 
-The bench YAML references a profile name; ``apply_profile`` loads the profile
-``.env`` before the blueprint is imported so that the blueprint's module-level
-``mirror_llm_endpoint_env()`` sees the correct ``DIMOS_LLM_*`` values.
+The bench calls ``load_dotenv()`` to load the root ``.env``, then
+``apply_profile`` reads ``timedmcpclient.endpoint`` from the profile JSON and
+copies the matching ``DIMOS_LLM_<ENDPOINT>_{BASE_URL,API_KEY}`` values into the
+generic ``DIMOS_LLM_{BASE_URL,API_KEY}``, which the blueprint's import-time
+``mirror_llm_endpoint_env()`` mirrors into ``OPENAI_*``.
 
 For headless MuJoCo runs, invoke under ``xvfb-run`` on Linux:
 
