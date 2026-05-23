@@ -45,3 +45,25 @@ profile は `configs/profiles/NAME/` ディレクトリに `config.json` と `.e
 profile は **値の置き場ルールを変えない**。category A を `.env` に書いてもなお動くが、それは anti-pattern (1) なので避ける。
 
 詳細は `docs/superpowers/specs/2026-05-19-profile-and-env-config-policy-design.md` 参照。
+
+## blueprint / run-mode 軸（2026-05 追記）
+
+env vs config（A/B/C）は「値の置き場」を決めるが、実際の責務分離はもう 2 軸を含む。
+
+| 軸 | 所有する concern | 選択方法 |
+|---|---|---|
+| **blueprint**（コード） | トポロジ: module 構成・transport・remapping・capability の有無（detection wiring 等） | `dimos run <bp>` 位置引数 |
+| **profile / config.json**（A） | デプロイ調整値: `timedmcpclient.model`（自由切替）, mic_mode, whisper params, tts impl, memory_limit | `--profile NAME` |
+| **profile / .env**（B/C） | secret + endpoint。machine（spark/desktop）の本質はここ | profile 同梱（gitignore） |
+| **run-mode（`g.*`）** | `simulation` 等の invocation パラメータ。profile でも blueprint でもない | `dimos run --simulation` / bench YAML `simulation:` |
+
+### 重要原則: 衝突は precedence で裁くのではなく設計で消す
+
+`model` は capability(blueprint) と backend(profile) に跨る共有値だが、**書き手を profile config.json
+に一本化**することで衝突源を消す。blueprint は model を焼き込まない（`TimedMcpClientConfig.model` が
+`DIMOS_LLM_MODEL` を seed default に持つ category-A field）。precedence
+（`explicit > env seed > default`）は衝突を裁くルールではなく、衝突を消した後のフォールバック順。
+
+> detection blueprint には VL モデルの profile（`qwen-vl` / `gpt4o`）を当てる、は enforce しない運用規約。
+
+詳細は `docs/superpowers/specs/2026-05-23-blueprint-profile-env-responsibility-design.md`。
