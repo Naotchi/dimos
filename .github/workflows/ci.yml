@@ -2,11 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
   pull_request:
-    paths-ignore:
-      - '**.md'
 
 concurrency:
   # Cancels runs from previous pushes in a PR.
@@ -15,14 +11,16 @@ concurrency:
 
 permissions: {}
 
+env:
+  # Disable default package installs. Each job should explicitly install a group.
+  UV_NO_SYNC: "1"
+
 jobs:
   lint:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:
       contents: read  # For checkout
-    env:
-      UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
 
     steps:
       - name: Checkout
@@ -38,16 +36,73 @@ jobs:
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
 
+  rust:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # For checkout
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Find Cargo workspace roots
+        id: find-crates
+        run: |
+          crates=$(find . -name Cargo.lock \
+            -not -path './target/*' \
+            -not -path './.venv/*' \
+            -not -path './node_modules/*' \
+            -not -path './.git/*' \
+            -printf '%h\n' \
+            | sed 's|^\./||' \
+            | sort)
+          echo "Found Rust workspace roots:"
+          echo "$crates"
+          {
+            echo "crates<<EOF"
+            echo "$crates"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ steps.find-crates.outputs.crates }}
+      - name: cargo fmt
+        env:
+          CRATES: ${{ steps.find-crates.outputs.crates }}
+        run: |
+          for crate in $CRATES; do
+            (cd "$crate" && cargo fmt --all -- --check)
+          done
+      - name: cargo clippy
+        env:
+          CRATES: ${{ steps.find-crates.outputs.crates }}
+        run: |
+          for crate in $CRATES; do
+            (cd "$crate" && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings)
+          done
+      - name: cargo test
+        env:
+          CRATES: ${{ steps.find-crates.outputs.crates }}
+        run: |
+          for crate in $CRATES; do
+            (cd "$crate" && cargo test --workspace --all-features --locked)
+          done
+
   md-babel:
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
       contents: read  # For checkout
 
     steps:
       - uses: actions/checkout@v6
-        with:
-          lfs: true
+      - name: Fetch LFS data needed by doc code blocks
+        run: git lfs pull --include="data/.lfs/go2_bigoffice.db.tar.gz,data/.lfs/unitree_go2_bigoffice_map.pickle.tar.gz"
       # Docs decode JPEG from SQLite via PyTurboJPEG; pyaudio needs portaudio.
       - name: Install system dependencies
         run: |
@@ -65,6 +120,34 @@ jobs:
       - name: Execute documentation code blocks
         run: ./bin/run-doc-codeblocks --ci --no-cache
 
+  docs-validate:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # For checkout
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: false
+          sparse-checkout: |
+            docs
+
+      - name: Pull docs LFS assets only
+        run: git lfs pull --include="docs/assets/**" --exclude=""
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Validate Mintlify docs
+        working-directory: docs
+        run: npm run validate
+
   tests:
     timeout-minutes: 20
     strategy:
@@ -76,9 +159,6 @@ jobs:
           - os: ubuntu
             pyver: "3.14t"
             experimental: false
-          - os: ubuntu
-            pyver: "3.15"
-            experimental: true
       fail-fast: true
     runs-on: ${{ matrix.os }}-latest
     continue-on-error: ${{ matrix.experimental }}
@@ -111,14 +191,16 @@ jobs:
       - name: Set PYTHON_GIL=0 for free-threading builds
         if: ${{ endsWith(matrix.pyver, 't') }}
         run: echo "PYTHON_GIL=0" >> $GITHUB_ENV
+      - name: Install dependencies
+        run: uv sync --group tests --frozen
       - name: Run tests
-        run: uv run pytest --numprocesses=3 --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco)'
+        run: uv run pytest --numprocesses=3 --cov=dimos/ --junitxml=junit.xml -m 'not (tool or self_hosted or mujoco or dimsim)'
       - name: Re-run the failing tests with maximum verbosity
         if: failure()
         env:
           COLOR: yes
         run: >-  # `exit 1` makes sure that the job remains red with flaky runs
-          uv run pytest --no-cov -vvvvv --lf  -m 'not (tool or self_hosted or mujoco)' && exit 1
+          uv run pytest --no-cov -vvvvv --lf  -m 'not (tool or self_hosted or mujoco or dimsim)' && exit 1
         shell: bash
       - name: Turn coverage into xml
         run: uv run python -m coverage xml
@@ -138,19 +220,14 @@ jobs:
           use_oidc: true
 
   self-hosted-tests:
-    # Skip on draft PRs and on PRs from forks — the latter would expose the
-    # self-hosted runner to untrusted code from external contributors.
+    # Skip on PRs from forks which would expose the self-hosted runner to untrusted code from external contributors.
     if: |
-      github.event_name == 'push' || (
-        github.event.pull_request.draft == false &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
+      github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     env:
-      UV_NO_SYNC: "1"  # Disable installing default packages on `uv run`
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ALIBABA_API_KEY: ${{ secrets.ALIBABA_API_KEY }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -260,7 +337,9 @@ jobs:
 
     needs:
     - lint
+    - rust
     - md-babel
+    - docs-validate
     - tests
     - self-hosted-tests
 
