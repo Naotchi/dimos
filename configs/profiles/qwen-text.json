@@ -3,5 +3,15 @@
   "localmicrophoneja": { "mic_mode": "vad" },
   "whisperhumaninputja": { "model": "large-v3", "fp16": true },
   "timedmcpclient": { "model": "openai:qwen/qwen3-30b-a3b-2507", "endpoint": "local" },
-  "assistantspeechnodeja": { "impl": "voicevox", "streaming": true }
+  "assistantspeechnodeja": {
+    "impl": "voicevox",
+    "streaming": true,
+    "voicevox": {
+      "speaker_id": 29,
+      "speed_scale": 1.0,
+      "pitch_scale": 0.0,
+      "intonation_scale": 1.0,
+      "volume_scale": 1.0
+    }
+  }
 }

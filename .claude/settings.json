@@ -5,11 +5,11 @@
   "permissions": {
     "deny": [
       "Read(**/.env)",
-      "Read(**/.env.*)",
+      "Read(**/.env.!(example))",
       "Edit(**/.env)",
-      "Edit(**/.env.*)",
+      "Edit(**/.env.!(example))",
       "Write(**/.env)",
-      "Write(**/.env.*)",
+      "Write(**/.env.!(example))",
       "Bash(cat *.env*)",
       "Bash(cat **/.env*)",
       "Bash(less *.env*)",

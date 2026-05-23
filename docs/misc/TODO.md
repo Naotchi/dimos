@@ -100,4 +100,6 @@
   等で単一応答化）のが本質的な直し方になります。
 - 物体検知するとき、rerun viewerにbbを表示してほしい
 - そろそろupstreamを取り込まないと
-- blueprintとprofileとenvの責務分離
+- アーム制御が喫緊の課題になる。go2前提でなくてもいいのでは？
+- 物体検出の目的が物の把持なら、vision modelではダメでbounding boxがわかるモデルにしないといけないのでは？
+- dimosをdocking stationで動かしたい
