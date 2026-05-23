@@ -27,10 +27,9 @@ underlying client reads:
 - ``DIMOS_LLM_BASE_URL`` — OpenAI-compatible base URL, ending in ``/v1``
 - ``DIMOS_LLM_API_KEY``  — bearer token / API key
 
-``resolve_llm_model()`` returns the model string and, as a side effect, sets
-``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` so ``langchain``'s
-``init_chat_model`` picks them up. Missing DIMOS_* vars leave the
-corresponding OPENAI_* var untouched, preserving any pre-set value.
+``mirror_llm_endpoint_env()`` sets ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY``
+from the ``DIMOS_LLM_*`` counterparts so ``langchain``'s ``init_chat_model``
+picks them up. The model name is owned by the module config, not resolved here.
 
 Examples::
 
@@ -60,15 +59,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "gpt-4o"
 
 
-def resolve_llm_model() -> str:
-    """Resolve the LLM model name and wire OPENAI_* env vars for the client.
+def mirror_llm_endpoint_env() -> None:
+    """Mirror ``DIMOS_LLM_BASE_URL`` / ``DIMOS_LLM_API_KEY`` into ``OPENAI_*``.
 
-    Side effect: when ``DIMOS_LLM_BASE_URL`` / ``DIMOS_LLM_API_KEY`` are set,
-    they are mirrored into ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` so any
-    OpenAI-compatible client downstream picks them up automatically. Existing
-    OPENAI_* values are only overwritten when the DIMOS_* counterpart is set.
+    Category B/C endpoint wiring (deploy-dependent). Existing ``OPENAI_*``
+    values are only overwritten when the ``DIMOS_*`` counterpart is set.
+
+    The model string is intentionally NOT resolved here — it is a category-A
+    value owned by the module config (``TimedMcpClientConfig.model``), seeded
+    from ``DIMOS_LLM_MODEL`` and overridable by the profile ``config.json``.
     """
-    model = os.environ.get("DIMOS_LLM_MODEL", DEFAULT_MODEL)
     base_url = os.environ.get("DIMOS_LLM_BASE_URL")
     api_key = os.environ.get("DIMOS_LLM_API_KEY")
 
@@ -78,5 +78,4 @@ def resolve_llm_model() -> str:
         os.environ["OPENAI_API_KEY"] = api_key
 
     effective_base = os.environ.get("OPENAI_BASE_URL", "<openai default>")
-    logger.info("[LLM] model=%s base_url=%s", model, effective_base)
-    return model
+    logger.info("[LLM] endpoint base_url=%s", effective_base)

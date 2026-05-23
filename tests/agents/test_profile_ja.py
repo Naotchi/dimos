@@ -45,11 +45,9 @@ def test_apply_profile_loads_env_with_override(tmp_path, monkeypatch):
     assert config_path == (tmp_path / "p" / "config.json")
 
 
-def test_apply_profile_then_resolve_llm_mirrors_openai_env(tmp_path, monkeypatch):
-    # Spec §9.2: the bench loads the profile .env, then imports the blueprint
-    # whose module-level resolve_llm_model() mirrors DIMOS_LLM_* → OPENAI_*.
-    # This asserts that exact chain (apply_profile must precede resolution).
-    from dimos.agents.llm_env_ja import resolve_llm_model
+def test_apply_profile_then_mirror_endpoint_env(tmp_path, monkeypatch):
+    # Spec §1: profile .env をロード後、endpoint mirroring が DIMOS_LLM_* → OPENAI_* を写す。
+    from dimos.agents.llm_env_ja import mirror_llm_endpoint_env
 
     monkeypatch.setattr(profile_ja, "PROFILES_ROOT", tmp_path)
     _make_profile(
@@ -59,6 +57,7 @@ def test_apply_profile_then_resolve_llm_mirrors_openai_env(tmp_path, monkeypatch
         config_text="{}",
     )
     profile_ja.apply_profile("p")
-    resolve_llm_model()
+    mirror_llm_endpoint_env()
     import os
     assert os.environ["OPENAI_BASE_URL"] == "http://prof:9/v1"
+    assert os.environ["OPENAI_API_KEY"] == "k"
