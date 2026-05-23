@@ -29,3 +29,15 @@ def test_timed_client_resolves_subclassed_config():
     from dimos.agents.mcp.mcp_client_ja import TimedMcpClient, TimedMcpClientConfig
 
     assert get_type_hints(TimedMcpClient)["config"] is TimedMcpClientConfig
+
+
+def test_endpoint_defaults_to_local():
+    from dimos.agents.mcp.mcp_client_ja import TimedMcpClientConfig
+
+    assert TimedMcpClientConfig().endpoint == "local"
+
+
+def test_endpoint_explicit_cloud():
+    from dimos.agents.mcp.mcp_client_ja import TimedMcpClientConfig
+
+    assert TimedMcpClientConfig(endpoint="cloud").endpoint == "cloud"

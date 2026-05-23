@@ -51,6 +51,10 @@ class TimedMcpClientConfig(McpClientConfig):
     model: str = Field(
         default_factory=lambda: os.environ.get("DIMOS_LLM_MODEL", DEFAULT_MODEL)
     )
+    # Category-A selection of which root-.env endpoint pair to use.
+    # profile_ja.apply_profile reads this and copies
+    # DIMOS_LLM_<ENDPOINT>_{BASE_URL,API_KEY} → DIMOS_LLM_{BASE_URL,API_KEY}.
+    endpoint: str = "local"
 
 
 class TimedMcpClient(McpClient):
