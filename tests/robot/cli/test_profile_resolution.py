@@ -6,7 +6,12 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Tests for `_resolve_profile` helper used by `dimos run --profile NAME`."""
+"""Tests for `_resolve_profile` / `_apply_profile` helpers used by `dimos run --profile NAME`.
+
+Each profile is now a single JSON file at ``configs/profiles/<name>.json``; there
+is no per-profile ``.env``.  Endpoint credentials live in the root ``.env`` as
+``DIMOS_LLM_{LOCAL,CLOUD}_{BASE_URL,API_KEY}``.
+"""
 
 from __future__ import annotations
 
@@ -19,35 +24,13 @@ from dimos.robot.cli.dimos import _resolve_profile
 
 def test_resolve_existing_profile(tmp_path, monkeypatch):
     profiles_root = tmp_path / "configs" / "profiles"
-    pdir = profiles_root / "local-qwen-voicevox"
-    pdir.mkdir(parents=True)
-    (pdir / "config.json").write_text("{}")
-    (pdir / ".env").write_text("FOO=bar\n")
+    profiles_root.mkdir(parents=True)
+    profile_file = profiles_root / "local-qwen-voicevox.json"
+    profile_file.write_text("{}")
 
     monkeypatch.chdir(tmp_path)
-    env_path, config_path = _resolve_profile("local-qwen-voicevox")
-    assert env_path == pdir / ".env"
-    assert config_path == pdir / "config.json"
-
-
-def test_resolve_profile_with_only_config(tmp_path, monkeypatch):
-    pdir = tmp_path / "configs" / "profiles" / "only-config"
-    pdir.mkdir(parents=True)
-    (pdir / "config.json").write_text("{}")
-    monkeypatch.chdir(tmp_path)
-    env_path, config_path = _resolve_profile("only-config")
-    assert env_path is None
-    assert config_path == pdir / "config.json"
-
-
-def test_resolve_profile_with_only_env(tmp_path, monkeypatch):
-    pdir = tmp_path / "configs" / "profiles" / "only-env"
-    pdir.mkdir(parents=True)
-    (pdir / ".env").write_text("X=1\n")
-    monkeypatch.chdir(tmp_path)
-    env_path, config_path = _resolve_profile("only-env")
-    assert env_path == pdir / ".env"
-    assert config_path is None
+    result = _resolve_profile("local-qwen-voicevox")
+    assert result == (tmp_path / "configs" / "profiles" / "local-qwen-voicevox.json").resolve()
 
 
 def test_resolve_missing_profile_raises(tmp_path, monkeypatch):
@@ -93,16 +76,19 @@ def test_profile_and_config_are_mutually_exclusive(tmp_path, monkeypatch):
     assert "mutually exclusive" in result.output.lower() or "exclusive" in result.output.lower()
 
 
-def test_profile_loads_env_with_override(tmp_path, monkeypatch):
-    """Profile `.env` overrides shell env (verified via process env after load)."""
+def test_apply_profile_selects_endpoint(tmp_path, monkeypatch):
+    """apply_profile copies the cloud endpoint vars into the generic DIMOS_LLM_* vars."""
     from dimos.robot.cli.dimos import _apply_profile
 
-    pdir = tmp_path / "configs" / "profiles" / "p2"
-    pdir.mkdir(parents=True)
-    (pdir / ".env").write_text("DIMOS_TEST_KEY=from_profile\n")
+    profiles_root = tmp_path / "configs" / "profiles"
+    profiles_root.mkdir(parents=True)
+    profile_file = profiles_root / "p2.json"
+    profile_file.write_text('{"timedmcpclient": {"endpoint": "cloud"}}')
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("DIMOS_TEST_KEY", "from_shell")
+    monkeypatch.setenv("DIMOS_LLM_CLOUD_BASE_URL", "http://cloud/v1")
+    monkeypatch.setenv("DIMOS_LLM_CLOUD_API_KEY", "ck")
 
-    config_path = _apply_profile("p2")
-    assert os.environ["DIMOS_TEST_KEY"] == "from_profile"
-    assert config_path is None  # no config.json in this profile
+    returned_path = _apply_profile("p2")
+    assert returned_path == (tmp_path / "configs" / "profiles" / "p2.json").resolve()
+    assert os.environ["DIMOS_LLM_BASE_URL"] == "http://cloud/v1"
+    assert os.environ["DIMOS_LLM_API_KEY"] == "ck"

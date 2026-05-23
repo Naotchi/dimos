@@ -59,6 +59,10 @@ def apply_profile(name: str) -> Path:
     config_path = resolve_profile(name)
     cfg = json.loads(config_path.read_text())
     endpoint = cfg.get("timedmcpclient", {}).get("endpoint", "local")
+    if endpoint not in ("local", "cloud"):
+        raise ValueError(
+            f"Profile {name!r}: timedmcpclient.endpoint must be 'local' or 'cloud', got {endpoint!r}"
+        )
     _select_endpoint_env(endpoint)
     return config_path
 

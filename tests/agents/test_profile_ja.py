@@ -75,6 +75,13 @@ def test_apply_profile_leaves_generic_unset_when_source_absent(tmp_path, monkeyp
     assert "DIMOS_LLM_BASE_URL" not in os.environ
 
 
+def test_apply_profile_rejects_unknown_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(profile_ja, "PROFILES_ROOT", tmp_path)
+    _write_profile(tmp_path, "p", {"timedmcpclient": {"endpoint": "bogus"}})
+    with pytest.raises(ValueError, match="bogus"):
+        profile_ja.apply_profile("p")
+
+
 def test_apply_profile_then_mirror_endpoint_env(tmp_path, monkeypatch):
     from dimos.agents.llm_env_ja import mirror_llm_endpoint_env
 
