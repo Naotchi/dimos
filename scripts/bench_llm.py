@@ -132,23 +132,27 @@ def warn_if_no_display_for_sim(cfg: dict[str, Any], kwargs: dict[str, Any]) -> N
 
 
 def main() -> int:
+    from dotenv import load_dotenv
+
     from dimos.agents.profile_ja import apply_profile
 
     args = parse_args()
     cfg_path = Path(args.config)
     cfg = load_config(cfg_path)
 
-    # Load the profile .env BEFORE importing the blueprint: the blueprint module
-    # calls mirror_llm_endpoint_env() at import time, which reads DIMOS_LLM_* and
-    # mirrors them into OPENAI_*. Importing earlier would miss the profile env.
+    # Load the root .env (DIMOS_LLM_{LOCAL,CLOUD}_* endpoint creds) BEFORE
+    # apply_profile, so the profile's endpoint selection can resolve them. The
+    # CLI loads root .env at dimos.py import; the bench reaches apply_profile
+    # first, so it must load it explicitly. apply_profile then sets
+    # DIMOS_LLM_{BASE_URL,API_KEY}, which the blueprint's import-time
+    # mirror_llm_endpoint_env() mirrors into OPENAI_*.
+    load_dotenv()
     config_path = apply_profile(cfg["profile"])
     from dimos.robot.cli.dimos import load_config_args
     from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
         unitree_go2_agentic_local_tts as blueprint,
     )
 
-    if config_path is None:
-        raise ValueError(f"profile {cfg['profile']!r} has no config.json")
     kwargs = load_config_args(blueprint.config(), [], config_path)
     # Run-mode is an invocation parameter, not a profile concern (Spec §2).
     # The bench YAML carries `simulation:` so the run stays reproducible.
