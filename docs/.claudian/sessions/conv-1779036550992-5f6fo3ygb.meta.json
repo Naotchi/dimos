@@ -1,16 +1,16 @@
 {
   "id": "conv-1779036550992-5f6fo3ygb",
   "providerId": "claude",
-  "title": "Compare Qwen models for voice robots",
+  "title": "Document Go2 network latency requirements",
   "titleGenerationStatus": "success",
   "createdAt": 1779036551049,
-  "updatedAt": 1779040585051,
-  "lastResponseAt": 1779040585051,
+  "updatedAt": 1779685416376,
+  "lastResponseAt": 1779685399759,
   "sessionId": "a91832af-269c-4417-82dd-67005f3aed5d",
   "providerState": {
     "providerSessionId": "a91832af-269c-4417-82dd-67005f3aed5d"
   },
-  "currentNote": "survey/unitree-go2-agentic-local-tts-llm-2026-05.md",
+  "currentNote": "misc/IOWN.md",
   "usage": {
     "model": "opus",
     "inputTokens": 1,
