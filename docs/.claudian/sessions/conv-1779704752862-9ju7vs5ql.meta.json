@@ -1,0 +1,23 @@
+{
+  "id": "conv-1779704752862-9ju7vs5ql",
+  "providerId": "claude",
+  "title": "Transfer 棚監視AI files to misc",
+  "titleGenerationStatus": "success",
+  "createdAt": 1779704752862,
+  "updatedAt": 1779704930183,
+  "lastResponseAt": 1779704930183,
+  "sessionId": "813a1b38-70ac-458e-9c99-ae50dd2fe2bb",
+  "providerState": {
+    "providerSessionId": "813a1b38-70ac-458e-9c99-ae50dd2fe2bb"
+  },
+  "usage": {
+    "model": "opus",
+    "inputTokens": 131,
+    "cacheCreationInputTokens": 8800,
+    "cacheReadInputTokens": 29646,
+    "contextWindow": 1000000,
+    "contextTokens": 38577,
+    "percentage": 4,
+    "contextWindowIsAuthoritative": true
+  }
+}
