@@ -90,9 +90,9 @@ class JapaneseWebInput(WebInput):
     self._audio_subject) so bench replay scripts can drive the pipeline.
     """
 
-    _audio_subject: rx.subject.Subject  # exposed for bench replay; treat as internal
+    _audio_subject: rx.subject.Subject[Any]  # exposed for bench replay; treat as internal
     _web_interface: RobotWebInterface
-    _human_transport: pLCMTransport
+    _human_transport: pLCMTransport[Any]
     _thread: Thread
 
     audio_out: Out[AudioEvent]

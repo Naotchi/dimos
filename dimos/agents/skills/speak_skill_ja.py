@@ -108,7 +108,7 @@ class AssistantSpeechNodeJa(Module):
     tts_idle: Out[bool]
     config: AssistantSpeechNodeJaConfig
 
-    def _make_tts_node(self):
+    def _make_tts_node(self) -> Any:
         """Construct the TTS node for this run's impl.
 
         The voicevox backend is imported lazily so a run that targets openai
@@ -143,7 +143,7 @@ class AssistantSpeechNodeJa(Module):
             return int(sr)
         return _STATIC_SAMPLE_RATE[self.config.impl]
 
-    def _select_input(self):
+    def _select_input(self) -> tuple[Any, Any]:
         """Pick (stream, callback) for this run based on ``config.streaming``.
 
         Streaming feeds pre-segmented sentences from the producer's
@@ -164,7 +164,7 @@ class AssistantSpeechNodeJa(Module):
 
         self._tts_node = self._make_tts_node()
         self._playback_sample_rate = self._sample_rate_for(self._tts_node)
-        self._audio_output = SounddeviceAudioOutput(
+        self._audio_output: SounddeviceAudioOutput | None = SounddeviceAudioOutput(
             sample_rate=self._playback_sample_rate
         )
 
@@ -174,7 +174,7 @@ class AssistantSpeechNodeJa(Module):
         self._is_idle = True
         self.tts_idle.publish(True)
 
-        self._text_subject = Subject()
+        self._text_subject: Subject[Any] | None = Subject()
         self._tts_node.consume_text(self._text_subject)
 
         tapped = self._tts_node.emit_audio().pipe(ops.do_action(self._on_audio_chunk))
@@ -191,14 +191,16 @@ class AssistantSpeechNodeJa(Module):
                 if self._idle_timer is not None:
                     self._idle_timer.cancel()
                     self._idle_timer = None
-        if getattr(self, "_text_subject", None) is not None:
-            self._text_subject.on_completed()
+        text_subject = getattr(self, "_text_subject", None)
+        if text_subject is not None:
+            text_subject.on_completed()
             self._text_subject = None
         if getattr(self, "_tts_node", None) is not None:
             self._tts_node.dispose()
             self._tts_node = None
-        if getattr(self, "_audio_output", None) is not None:
-            self._audio_output.stop()
+        audio_output = getattr(self, "_audio_output", None)
+        if audio_output is not None:
+            audio_output.stop()
             self._audio_output = None
         super().stop()
 

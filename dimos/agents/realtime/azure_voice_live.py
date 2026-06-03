@@ -428,7 +428,7 @@ class AzureVoiceLiveAgent(Module):
             input_audio_noise_reduction=AudioNoiseReduction(
                 type="azure_deep_noise_suppression"
             ),
-            tools=tools,
+            tools=tools,  # type: ignore[arg-type]  # SDK accepts plain dicts; see _mcp_to_voice_function
         )
         await self._conn.session.update(session=session)
 
@@ -798,7 +798,7 @@ class AzureVoiceLiveAgent(Module):
             self._web_audio_sub = None
         if self._mic is not None:
             try:
-                self._mic.stop()
+                self._mic.stop()  # type: ignore[attr-defined]  # no public stop(); stream torn down via subscription dispose above
             except Exception:
                 pass
             self._mic = None

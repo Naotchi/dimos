@@ -36,6 +36,7 @@ from typing import Any
 
 import reactivex as rx
 import reactivex.operators as ops
+from reactivex.disposable import Disposable
 from pydantic import Field
 
 from dimos.agents.bench_ja import log_bench_event
@@ -130,7 +131,7 @@ class WhisperHumanInputJa(Module):
         # Bridge In[AudioEvent] → internal Subject so bench replay scripts
         # can also publish to self._audio_subject directly (parity with
         # JapaneseWebInput).
-        gate_unsub = self.mic_utterance.subscribe(self._audio_subject.on_next)
+        gate_unsub = Disposable(self.mic_utterance.subscribe(self._audio_subject.on_next))
         self.register_disposable(gate_unsub)
 
         logger.info("WhisperHumanInputJa started (Whisper ja)")

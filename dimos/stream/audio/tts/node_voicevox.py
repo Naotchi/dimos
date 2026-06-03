@@ -155,9 +155,13 @@ class VoicevoxTTSNode(AbstractTextConsumer, AbstractAudioEmitter, AbstractTextEm
 
     def _synthesize_speech(self, text: str) -> None:
         try:
+            audio_query_params: dict[str, str | int] = {
+                "text": text,
+                "speaker": self._speaker_id,
+            }
             q = requests.post(
                 f"{self._base}/audio_query",
-                params={"text": text, "speaker": self._speaker_id},
+                params=audio_query_params,
                 timeout=self._timeout,
             )
             q.raise_for_status()
