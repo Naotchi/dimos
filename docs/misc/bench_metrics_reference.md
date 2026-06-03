@@ -2,24 +2,62 @@
 
 agentic-local-tts ベンチ (`scripts/bench_llm.py` → `scripts/bench_agentic_local_tts.py`) の計測ポイントと、そこから計算する metric の定義。
 
+## 使い方
+
+2 段構成: **① 計測ラン**（`bench_llm.py` が `main.jsonl` にイベントを吐く）→ **② 集計**（`bench_agentic_local_tts.py` が読んで metric を算出）。
+
+### ① 計測ラン
+
+CLI は実機の `dimos run <blueprint> --profile <name>` に合わせてある（blueprint は位置引数、`--profile` 共通、bench 固有ノブだけ `--bench` YAML）。
+
+```bash
+python scripts/bench_llm.py unitree-go2-agentic-local-tts-detection \
+    --profile qwen-vl \
+    --bench scripts/bench_configs/agentic_ja.yaml
+
+# headless MuJoCo（Linux）の場合は xvfb 下で
+xvfb-run -a python scripts/bench_llm.py <blueprint> --profile <name> --bench scripts/bench_configs/agentic_ja.yaml
+```
+
+- 出力先は `logs/{ts}-{blueprint}-{profile}/main.jsonl`（`--bench` YAML の `label:` で上書き可）。
+- blueprint は `dimos run` と同じく名前解決されるので、fork-local の `-detection` 系も計測できる。fixture wav を `LocalMicrophoneJa.inject_utterance` で注入してイベントを記録する。
+- `.env` と `configs/profiles/<name>.json` から LLM エンドポイント (`DIMOS_LLM_*` → `OPENAI_*`) が解決される（`--profile` のローダーは `dimos run` と共通）。
+- `--bench` YAML（`scripts/bench_configs/agentic_ja.yaml`）が持つのは bench 固有ノブのみ: `fixtures` / `runs` / `warmup` / `shuffle` / `turn_timeout` / `headless` / `simulation` / 任意の `label`。
+
+### ② 集計
+
+```bash
+# 引数なし = 最新の logs/*agentic-local-tts*/ を自動選択
+python scripts/bench_agentic_local_tts.py
+
+# run-dir を明示 / JSON 出力
+python scripts/bench_agentic_local_tts.py logs/<run-dir> --json out.json
+```
+
+- per-turn の e2e レイテンシ・ステージ内訳・`mcp_tool:*` 個別サマリを表示。
+- **warmup turn は集計から除外**され、残りの live turn を 1 プールで集約する。
+- `--config {auto,agentic-local-tts,voice-live}` で analyzer モードを切替（既定 `auto` は run-dir 名から推定）。
+
+以下は `main.jsonl` に出るイベントと、②が計算する metric の定義。
+
 ## 計測イベント (= 時刻マーカー)
 
 すべて `dimos/agents/bench_ja/log_bench_event` 経由で `main.jsonl` に出力。各イベントには `t` (perf_counter) と `turn_id` が付く。
 
 | event_kind | 発火元 | 発火タイミング | 付帯フィールド |
 |---|---|---|---|
-| `user_audio_end` | `scripts/bench_llm.py:258` | fixture wav を inject する**直前** = ユーザー発話終了 | `audio_seconds`, `fixture_id`, `warmup` |
+| `user_audio_end` | `scripts/bench_llm.py:280` | fixture wav を inject する**直前** = ユーザー発話終了 | `audio_seconds`, `fixture_id`, `run_idx`, `warmup` |
 | `stt_done` | `whisper_human_input_ja.py:86` | Whisper が text を emit した瞬間 | `duration_s`, `audio_seconds`, `text_len` |
-| `llm_first_token` | `mcp_client_ja.py:75` | LLM の `AIMessageChunk` 1 個目を観測（**step 毎に 1 回**） | `step_idx` |
-| `first_tool_call` | `mcp_client_ja.py:103` | LLM が最初に tool_call を発行した瞬間 | `tool` |
-| `llm_step` | `mcp_client_ja.py:107` | langgraph の `agent` node 完了時 | `duration_s`, `step_idx`, `input_tokens`, `output_tokens` |
-| `tools_step` | `mcp_client_ja.py:107` | langgraph の `tools` node 完了時 | `duration_s`, `step_idx` |
-| `speak_invoke` | `speak_skill_ja.py:168` | AIMessage を受信し TTS に text を流した瞬間 | — |
-| `first_audio_out` | `speak_skill_ja.py:195` | TTS から最初の AudioEvent chunk が出力デバイスに届いた瞬間 | `tool="speak"` |
-| `tts_idle` | `speak_skill_ja.py:178,225` | TTS busy 突入 / 再生 drain 完了 | `idle` (bool) |
-| `MCP tool done` | (mcp tool wrapper, log Tee) | 個別 MCP tool 実行完了 | `tool`, `duration` |
-| `turn_done` | `mcp_client_ja.py:123` | 最終 AIMessage を publish したエージェントループ終了 | `duration_s`, `llm_s`, `n_steps`, `n_tool_calls` |
-| `turn_timeout` | `bench_llm.py:280` | `idle_event.wait()` が turn_timeout に達した | — |
+| `llm_first_token` | `mcp_client_ja.py:133` | LLM の `AIMessageChunk` 1 個目を観測（**step 毎に 1 回**） | `step_idx` |
+| `first_tool_call` | `mcp_client_ja.py:177` | LLM が最初に tool_call を発行した瞬間 | `tool` |
+| `llm_step` | `mcp_client_ja.py:181` (kind 決定は `:159`) | langgraph の `agent`/`model` node 完了時 | `node`, `duration_s`, `step_idx`, `n_messages`, `input_tokens`, `output_tokens` |
+| `tools_step` | `mcp_client_ja.py:181` (kind 決定は `:159`) | langgraph の `tools` node 完了時。kind は `f"{node_name}_step"` で動的生成 | `node`, `duration_s`, `step_idx`, `n_messages` |
+| `speak_invoke` | `speak_skill_ja.py:242` | AIMessage を受信し TTS に text を流した瞬間 | — |
+| `first_audio_out` | `speak_skill_ja.py:261` | TTS から最初の AudioEvent chunk が出力デバイスに届いた瞬間 | `tool="speak"` |
+| `tts_idle` | `speak_skill_ja.py:240,291` | TTS busy 突入 / 再生 drain 完了 | `idle` (bool) |
+| `MCP tool done` | `mcp_server.py:131,134` (structlog → log Tee) | 個別 MCP tool 実行完了 | `tool`, `duration` |
+| `turn_done` | `mcp_client_ja.py:201` | 最終 AIMessage を publish したエージェントループ終了 | `duration_s`, `llm_s`, `n_steps`, `n_tool_calls` |
+| `turn_timeout` | `bench_llm.py:303` | `idle_event.wait()` が turn_timeout に達した | `fixture_id`, `run_idx` |
 
 ---
 
@@ -45,7 +83,7 @@ t0 = `user_audio_end.t` とする。
 | `llm_step_0_s` | `llm_steps[0].duration_s` | 1 回目の LLM step duration |
 | `llm_step_last_s` | `llm_steps[-1].duration_s` | 最後の LLM step duration (= 発話を吐くステップ) |
 | `llm_total_s` | `Σ llm_steps[i].duration_s` | 全 LLM step duration の和 |
-| `tools_total_s` | `Σ mcp_tools[i].duration` | 全 MCP tool 実行時間の和 |
+| `tools_total_s` | `Σ tools_steps[i].duration_s` | 全 langgraph `tools` node duration の和（個別 MCP tool ではなく tools ノード全体）|
 
 ### トークン
 

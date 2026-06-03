@@ -1,0 +1,15 @@
+# Slim bench config: bench-only knobs. Blueprint + profile are CLI args now
+# (mirrors `dimos run <blueprint> --profile <name>`):
+#
+#   python scripts/bench_llm.py unitree-go2-agentic-local-tts-detection \
+#       --profile qwen-vl --bench scripts/bench_configs/agentic_ja.yaml
+#
+# `label:` (optional) overrides the logs/{ts}-<label>/ run-dir name;
+# defaults to "<blueprint>-<profile>".
+fixtures: tests/bench_fixtures/agentic_ja/fixtures.yaml
+runs: 3
+warmup: 1
+shuffle: false
+turn_timeout: 30.0
+headless: true
+simulation: mujoco   # str enum: "mujoco" | "dimsim" | "" (real robot). legacy `true` == mujoco

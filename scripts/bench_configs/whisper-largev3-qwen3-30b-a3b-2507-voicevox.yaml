@@ -1,9 +1,0 @@
-name: whisper-largev3-qwen3-30b-a3b-2507-voicevox
-profile: qwen-text
-fixtures: tests/bench_fixtures/agentic_ja/fixtures.yaml
-runs: 3
-warmup: 1
-shuffle: false
-turn_timeout: 30.0
-headless: true
-simulation: true

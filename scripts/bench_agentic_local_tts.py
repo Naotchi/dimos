@@ -4,7 +4,7 @@
 Usage:
     python scripts/bench_agentic_local_tts.py [logs/<run-dir>] [--json FILE]
 
-Without a run-dir argument, picks the latest logs/*-bench-agentic-local-tts/.
+Without a run-dir argument, picks the latest logs/*agentic-local-tts*/.
 
 Reads main.jsonl and prints per-turn end-to-end latencies and stage breakdown:
   - agent_first_call_s  (user_audio_end -> first_tool_call)
@@ -318,10 +318,14 @@ def read_run_meta(jsonl_path: Path) -> dict[str, Any]:
 def _pick_run(arg: str | None) -> Path:
     if arg:
         return Path(arg)
-    candidates = sorted(Path("logs").glob("*-bench-agentic-local-tts"))
+    # Run dirs are named logs/{ts}-{blueprint}-{profile}; any blueprint whose
+    # name contains "agentic-local-tts" (incl. the *-detection variant) matches.
+    # Sort by mtime, not name: logs/ mixes bench timestamps (2026-06-03-...) with
+    # `dimos run` ids (20260602-...), so lexical order != chronological order.
+    candidates = [d for d in Path("logs").glob("*agentic-local-tts*") if d.is_dir()]
     if not candidates:
-        sys.exit("no logs/*-bench-agentic-local-tts runs found")
-    return candidates[-1]
+        sys.exit("no logs/*agentic-local-tts* runs found")
+    return max(candidates, key=lambda d: d.stat().st_mtime)
 
 
 def _print_table(title: str, rows: dict[str, dict[str, float]]) -> None:

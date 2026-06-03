@@ -1,10 +1,13 @@
 #!/usr/bin/env python
-"""Config-driven LLM/STT/TTS bench runner.
+"""Replay-bench runner for a DimOS blueprint.
 
-Boots ``unitree_go2_agentic_local_tts`` with module configs resolved from a
-profile (``configs/profiles/<name>.json``), injects fixture wavs via
-``LocalMicrophoneJa.inject_utterance``, and writes bench events to
-``logs/{ts}-{config.name}/main.jsonl``.
+Mirrors the real ``dimos run <blueprint> --profile <name>`` invocation: the
+blueprint is a positional arg (resolved by name like the CLI, so any registered
+variant incl. the fork-local ``*-detection`` is benchable), ``--profile`` selects
+``configs/profiles/<name>.json``, and ``--bench`` points at a slim YAML carrying
+the bench-only knobs (fixtures / runs / warmup / shuffle / turn_timeout /
+simulation). Injects fixture wavs via ``LocalMicrophoneJa.inject_utterance`` and
+writes bench events to ``logs/{ts}-{blueprint}-{profile}/main.jsonl``.
 
 The bench calls ``load_dotenv()`` to load the root ``.env``, then
 ``apply_profile`` reads ``timedmcpclient.endpoint`` from the profile JSON and
@@ -14,10 +17,11 @@ generic ``DIMOS_LLM_{BASE_URL,API_KEY}``, which the blueprint's import-time
 
 For headless MuJoCo runs, invoke under ``xvfb-run`` on Linux:
 
-    xvfb-run -a python scripts/bench_llm.py --config scripts/bench_configs/<name>.yaml
+    xvfb-run -a python scripts/bench_llm.py <blueprint> --profile <name> --bench <yaml>
 
 Usage:
-    python scripts/bench_llm.py --config scripts/bench_configs/<name>.yaml
+    python scripts/bench_llm.py unitree-go2-agentic-local-tts-detection \\
+        --profile qwen-vl --bench scripts/bench_configs/agentic_ja.yaml
 """
 
 from __future__ import annotations
@@ -44,23 +48,66 @@ from dimos.agents.skills.speak_skill_ja import AssistantSpeechNodeJa
 from dimos.core.coordination.module_coordinator import ModuleCoordinator
 from dimos.utils.logging_config import set_run_log_dir
 
-# NOTE: dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts
-# is intentionally NOT imported here. It calls mirror_llm_endpoint_env() at module load,
-# which reads DIMOS_LLM_* env. Import is deferred to main() AFTER apply_profile().
+# NOTE: blueprint modules are intentionally NOT imported here. They call
+# mirror_llm_endpoint_env() at module load, which reads DIMOS_LLM_* env. Both
+# the named blueprint and the get_all_blueprints registry (which imports every
+# blueprint) are pulled in inside main() AFTER apply_profile() has set the env.
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True, help="Path to bench config YAML")
+    p = argparse.ArgumentParser(
+        description="Replay-bench a DimOS blueprint, mirroring `dimos run <blueprint> --profile <name>`.",
+    )
+    p.add_argument(
+        "blueprint",
+        nargs="+",
+        help="Blueprint name(s), joined with '-' (e.g. unitree-go2-agentic-local-tts-detection)",
+    )
+    p.add_argument(
+        "--profile",
+        required=True,
+        help="Named profile under configs/profiles/<name>.json (same as `dimos run --profile`)",
+    )
+    p.add_argument(
+        "--bench",
+        required=True,
+        type=Path,
+        help="Path to bench YAML (fixtures / runs / warmup / shuffle / turn_timeout / simulation)",
+    )
     return p.parse_args()
 
 
-def load_config(path: Path) -> dict[str, Any]:
+def load_bench(path: Path) -> dict[str, Any]:
     cfg = yaml.safe_load(path.read_text())
-    for required in ("name", "profile"):
-        if required not in cfg:
-            raise ValueError(f"config {path} missing required {required!r} field")
+    if "fixtures" not in cfg:
+        raise ValueError(f"bench config {path} missing required 'fixtures' field")
     return cfg
+
+
+# global_config.simulation is a string enum, mirroring `dimos run --simulation`
+# (SIMULATORS in dimos/robot/cli/dimos.py). "" = real robot. Kept local to avoid
+# importing the heavy CLI module at bench import time.
+SIMULATORS = ("mujoco", "dimsim")
+
+
+def normalize_simulation(value: Any) -> str:
+    """Map the bench YAML ``simulation:`` field to ``global_config.simulation``.
+
+    Accepts the str enum (``"mujoco"`` | ``"dimsim"``), a legacy bool
+    (``True`` -> ``"mujoco"`` for backwards compat), or falsy (-> ``""``,
+    i.e. real robot). The CLI normalizes a bare ``--simulation`` to ``mujoco``
+    the same way.
+    """
+    if value is True:
+        return SIMULATORS[0]
+    if not value:
+        return ""
+    s = str(value)
+    if s not in SIMULATORS:
+        raise ValueError(
+            f"bench 'simulation' must be one of {SIMULATORS} or a bool, got {value!r}"
+        )
+    return s
 
 
 def config_hash(cfg: dict[str, Any]) -> str:
@@ -99,20 +146,20 @@ def fixture_iter(fixtures: list[dict[str, Any]], runs: int, warmup: int, shuffle
 
 
 def setup_run_dir(
-    cfg: dict[str, Any],
-    cfg_path: Path,
+    label: str,
+    bench_path: Path,
     config_path: Path,
     kwargs: dict[str, Any],
 ) -> Path:
     ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    out_dir = Path("logs") / f"{ts}-{cfg['name']}"
+    out_dir = Path("logs") / f"{ts}-{label}"
     out_dir.mkdir(parents=True, exist_ok=True)
     # Self-describing run record: the bench YAML, the referenced profile
     # JSON, and the resolved blueprint_args actually passed to build().
     # No secrets are logged — endpoint creds live in the root .env, never in
     # the profile; the endpoint is captured redacted via
     # run_meta.resolved_endpoint instead.
-    shutil.copy2(cfg_path, out_dir / "bench.yaml")
+    shutil.copy2(bench_path, out_dir / "bench.yaml")
     shutil.copy2(config_path, out_dir / "profile_config.json")
     (out_dir / "resolved_config.json").write_text(
         json.dumps(kwargs, indent=2, ensure_ascii=False, sort_keys=True)
@@ -140,8 +187,10 @@ def main() -> int:
     from dimos.agents.profile_ja import apply_profile
 
     args = parse_args()
-    cfg_path = Path(args.config)
-    cfg = load_config(cfg_path)
+    bench_path = Path(args.bench)
+    cfg = load_bench(bench_path)
+    blueprint_name = "-".join(args.blueprint)
+    label = cfg.get("label") or f"{blueprint_name}-{args.profile}"
 
     # Load the root .env (DIMOS_LLM_{LOCAL,CLOUD}_* endpoint creds) BEFORE
     # apply_profile, so the profile's endpoint selection can resolve them. The
@@ -150,29 +199,34 @@ def main() -> int:
     # DIMOS_LLM_{BASE_URL,API_KEY}, which the blueprint's import-time
     # mirror_llm_endpoint_env() mirrors into OPENAI_*.
     load_dotenv()
-    config_path = apply_profile(cfg["profile"])
+    config_path = apply_profile(args.profile)
+    from dimos.core.coordination.blueprints import autoconnect
     from dimos.robot.cli.dimos import load_config_args
-    from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts import (
-        unitree_go2_agentic_local_tts as blueprint,
-    )
+    from dimos.robot.get_all_blueprints import get_by_name_or_exit
+
+    # Resolve the blueprint by name the same way `dimos run` does, so any
+    # registered variant (incl. the fork-local *-detection) is benchable.
+    blueprint = autoconnect(*map(get_by_name_or_exit, args.blueprint))
 
     kwargs = load_config_args(blueprint.config(), [], config_path)
     # Run-mode is an invocation parameter, not a profile concern (Spec §2).
     # The bench YAML carries `simulation:` so the run stays reproducible.
-    kwargs.setdefault("g", {})["simulation"] = bool(cfg.get("simulation", False))
+    # global_config.simulation is a str enum ("mujoco"|"dimsim"|""), not a bool.
+    kwargs.setdefault("g", {})["simulation"] = normalize_simulation(cfg.get("simulation"))
 
     os.environ.setdefault("MUJOCO_GL", "egl")
     warn_if_no_display_for_sim(cfg, kwargs)
 
-    out_dir = setup_run_dir(cfg, cfg_path, config_path, kwargs)
-    print(f"[bench] {cfg['name']} ({cfg['profile']}) → {out_dir}", flush=True)
+    out_dir = setup_run_dir(label, bench_path, config_path, kwargs)
+    print(f"[bench] {label} → {out_dir}", flush=True)
 
     # build() pops "g" from kwargs in place, so snapshot for the record first.
     resolved_snapshot = copy.deepcopy(kwargs)
     log_bench_event(
         "run_meta",
-        config_name=cfg["name"],
-        profile=cfg["profile"],
+        config_name=label,
+        blueprint=blueprint_name,
+        profile=args.profile,
         resolved_config=resolved_snapshot,
         resolved_endpoint=redacted_endpoint(resolved_snapshot),
         config_hash=config_hash(resolved_snapshot),
