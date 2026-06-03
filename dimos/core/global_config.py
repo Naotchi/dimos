@@ -45,6 +45,7 @@ class GlobalConfig(BaseSettings):
     rerun_web: bool = RERUN_ENABLE_WEB
     rerun_host: str | None = None
     rerun_websocket_server_port: int = 3030
+    rerun_obs_layout: bool = False
     n_workers: int = 2
     memory_limit: str = "auto"
     mujoco_camera_position: str | None = None

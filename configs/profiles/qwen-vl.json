@@ -1,4 +1,5 @@
 {
+  "g": { "rerun_obs_layout": true },
   "rerunbridgemodule": { "memory_limit": "25%" },
   "localmicrophoneja": { "mic_mode": "vad" },
   "whisperhumaninputja": { "model": "large-v3", "fp16": true },

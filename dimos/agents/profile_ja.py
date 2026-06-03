@@ -64,7 +64,23 @@ def apply_profile(name: str) -> Path:
             f"Profile {name!r}: timedmcpclient.endpoint must be 'local' or 'cloud', got {endpoint!r}"
         )
     _select_endpoint_env(endpoint)
+    _apply_obs_layout(cfg)
     return config_path
+
+
+def _apply_obs_layout(cfg: dict) -> None:
+    """Propagate the profile's ``g.rerun_obs_layout`` flag before blueprint import.
+
+    The Rerun OBS layout swap reads ``global_config.rerun_obs_layout`` at
+    blueprint *import* time — earlier than ModuleCoordinator applies the ``g``
+    block — so set it here, while ``apply_profile`` still runs pre-import. Only
+    acts when the profile declares the key.
+    """
+    g = cfg.get("g") or {}
+    if "rerun_obs_layout" in g:
+        from dimos.core.global_config import global_config
+
+        global_config.update(rerun_obs_layout=bool(g["rerun_obs_layout"]))
 
 
 def _select_endpoint_env(endpoint: str) -> None:
