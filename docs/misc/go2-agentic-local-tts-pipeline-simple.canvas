@@ -6,14 +6,14 @@
 		{"id":"nav","type":"text","text":"② マッピング & ナビゲーション\nLiDAR から地図とコストマップを作り、A* で経路計画して自律移動する","x":260,"y":-220,"width":340,"height":160,"color":"2"},
 		{"id":"percep","type":"text","text":"③ 知覚 & 空間記憶\nカメラで物体を検出し、位置つきで空間記憶に蓄積する","x":260,"y":80,"width":340,"height":150,"color":"6"},
 		{"id":"agent","type":"text","text":"④ エージェント\n日本語 LLM が MCP ツールを呼んでロボットに指示を出す","x":720,"y":80,"width":340,"height":150,"color":"3"},
-		{"id":"voice","type":"text","text":"⑤ 音声入出力\nローカル日本語 STT/TTS で人の声を聞き、応答を喋る","x":1180,"y":80,"width":340,"height":150,"color":"5"},
 		{"id":"go2","type":"text","text":"🐕 Unitree Go2\nWiFi STA / ROBOT_IP 192.168.11.10\nWebRTC サーバ（単一ピア）\nオンボード: ゲイト制御 + 障害物回避","x":-980,"y":-180,"width":320,"height":140,"color":"4"},
 		{"id":"wifi","type":"text","text":"📶 専有 WiFi AP / ルータ（最終ホップ）","x":-980,"y":-10,"width":320,"height":90,"color":"4"},
 		{"id":"onua","type":"text","text":"APN 終端 (拠点A) — ONU / GW","x":-980,"y":110,"width":320,"height":90,"color":"4"},
 		{"id":"apn","type":"text","text":"✨ All-Photonic Network\n\nA/B: ここを一般回線/VPN に差替え","x":-540,"y":20,"width":220,"height":200,"color":"5"},
+		{"id":"voice","type":"text","text":"⑤ 音声入出力\nローカル日本語 STT/TTS で人の声を聞き、応答を喋る","x":1180,"y":80,"width":340,"height":150,"color":"5"},
 		{"id":"viz","type":"text","text":"⑥ 可視化\nRerun で 3D 地図とカメラ映像を表示し、状態を見える化する","x":-200,"y":-400,"width":1480,"height":90,"color":"1"},
 		{"id":"conn","type":"text","text":"① 接続（WebRTC ピア＝遠隔PC側）\nGo2 と WebRTC 接続し、映像・LiDAR・odom を受信して cmd_vel を送る","x":-200,"y":-220,"width":340,"height":160,"color":"4"},
-		{"id":"title","type":"text","text":"# cut 1-X案 \n拠点A (ロボット): Go2 + WiFi/ルータのみ\n拠点B (遠隔PC): dimos フルスタック\n拠点A - B間をWebRTCで接続\n注意: 遠隔PCが ROBOT_IP に到達する必要あり（フラット L2/L3 なら ICE そのまま通る・別サブネットならトンネル）。","x":-470,"y":-680,"width":1480,"height":170,"color":"3"}
+		{"id":"title","type":"text","text":"# cut 1-X案 \n拠点A (ロボット): Go2 + WiFi/ルータのみ\n拠点B (遠隔PC): dimos フルスタック\n拠点A - B間をWebRTCで接続\n注意: 遠隔PCが ROBOT_IP に到達する必要あり（フラット L2/L3 なら ICE そのまま通る・別サブネットならトンネル）。","x":-240,"y":-680,"width":1480,"height":170,"color":"3"}
 	],
 	"edges":[
 		{"id":"e1","fromNode":"conn","fromSide":"right","toNode":"nav","toSide":"left","label":"映像 / LiDAR / odom"},
@@ -28,5 +28,9 @@
 		{"id":"p2","fromNode":"wifi","fromSide":"bottom","toNode":"onua","toSide":"top","label":"LAN"},
 		{"id":"p3","fromNode":"onua","fromSide":"right","toNode":"apn","toSide":"left","label":"fiber"},
 		{"id":"p4","fromNode":"apn","fromSide":"right","toNode":"conn","toSide":"left","label":"拠点B: ONU → LAN → PC"}
-	]
+	],
+	"metadata":{
+		"version":"1.0-1.0",
+		"frontmatter":{}
+	}
 }
