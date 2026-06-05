@@ -1,4 +1,4 @@
-# ネットワーク通信遅延の要求
+ ネットワーク通信遅延の要求
 
 [[platforms/quadruped/go2/index.md]]:74（pre-flight チェックの項目）
 
@@ -34,13 +34,13 @@
 
 ### DimOS↔Go2 で実際に流れるストリームのレート
 
-| ストリーム | レート | 出典 |
-|------|------|------|
-| color_image | ~14 Hz | [[robot/unitree/go2/blueprints/basic/unitree_go2_basic.py]]:113 |
-| global_map | ~7.8 Hz | unitree_go2_basic.py:112 |
-| global_costmap | ~7.6 Hz | unitree_go2_basic.py:114 |
-| LiDAR | 10 Hz | hardware/sensors/lidar/livox/module.py:60 |
-| odom (sim) | 50 Hz | mujoco_connection.py:61 |
+| ストリーム          | レート     | 出典                                                              |
+| -------------- | ------- | --------------------------------------------------------------- |
+| color_image    | ~14 Hz  | [[robot/unitree/go2/blueprints/basic/unitree_go2_basic.py]]:113 |
+| global_map     | ~7.8 Hz | unitree_go2_basic.py:112                                        |
+| global_costmap | ~7.6 Hz | unitree_go2_basic.py:114                                        |
+| LiDAR          | 10 Hz   | hardware/sensors/lidar/livox/module.py:60                       |
+| odom (sim)     | 50 Hz   | mujoco_connection.py:61                                         |
 
 DimOS が WebRTC 越しにやっているのは **~7〜14Hz のセンサ受信 + 高レベル sport コマンド送信** で、100Hz の往復ループは存在しない。
 
