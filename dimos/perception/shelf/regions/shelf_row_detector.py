@@ -21,6 +21,9 @@ from dimos.msgs.sensor_msgs.Image import Image
 from dimos.perception.detection.detectors.base import Detector
 from dimos.perception.detection.type.detection2d.bbox import Detection2DBBox
 from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 _ROW_QUERY = "each horizontal shelf row"
 
@@ -84,6 +87,10 @@ class ShelfRowDetector(Detector):
             iy2 = max(iy1 + 1, min(int(y2), h))
             rows.append((ix1, iy1, ix2, iy2))
         if not rows:
+            logger.warning(
+                "Shelf-row grounding returned no usable rows; "
+                "falling back to the whole image as a single row."
+            )
             rows = [(0, 0, w, h)]  # fallback: whole image as one row
         return rows
 

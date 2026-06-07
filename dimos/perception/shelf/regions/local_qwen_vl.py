@@ -24,6 +24,9 @@ from dimos.msgs.sensor_msgs.Image import Image
 from dimos.perception.detection.type.detection2d.bbox import Detection2DBBox
 from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
 from dimos.utils.llm_utils import extract_json
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 
 def _resolve_endpoint() -> tuple[str, str, str]:
@@ -91,8 +94,10 @@ class LocalQwenVlModel(QwenVlModel):
         try:
             items = extract_json(raw)
         except (json.JSONDecodeError, ValueError, TypeError):
+            logger.warning("VLM grounding response was not parseable JSON; returning no rows.")
             return result
         if not isinstance(items, list):
+            logger.warning("VLM grounding JSON was not a list; returning no rows.")
             return result
 
         for track_id, item in enumerate(items):
