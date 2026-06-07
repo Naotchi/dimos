@@ -4,6 +4,16 @@
 # you may not use this file except in compliance with the License.
 
 import os
+from functools import cached_property
+from typing import Any
+
+from openai import OpenAI
+
+from dimos.models.vl.qwen import QwenVlModel
+from dimos.msgs.sensor_msgs.Image import Image
+from dimos.perception.detection.type.detection2d.bbox import Detection2DBBox
+from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
+from dimos.utils.llm_utils import extract_json
 
 
 def _resolve_endpoint() -> tuple[str, str, str]:
@@ -25,3 +35,81 @@ def _resolve_endpoint() -> tuple[str, str, str]:
     if not model:
         raise ValueError("SHELF_VLM_MODEL or DIMOS_LLM_MODEL must be set")
     return base_url, model, api_key
+
+
+_ROW_PROMPT = (
+    "Detect every horizontal shelf row (each shelf layer / tier) in this image. "
+    "Return one bounding box per shelf row as a JSON array, no other text:\n"
+    '[{"bbox_2d": [x1, y1, x2, y2], "label": "shelf row"}]\n'
+    "Coordinates must be normalized to the 0-1000 range. If there are none, return []."
+)
+
+
+class LocalQwenVlModel(QwenVlModel):
+    """``QwenVlModel`` pointed at a local OpenAI-compatible endpoint (LM Studio).
+
+    Two overrides vs the upstream cloud model:
+
+    * ``_client`` targets the local endpoint (``SHELF_VLM_*`` / ``DIMOS_LLM_*``).
+    * ``query_detections`` parses the local Qwen's native ``bbox_2d`` / 0-1000
+      normalized grounding format (the upstream base prompt asks for pixel
+      ``[label, x1, y1, x2, y2]`` lists, which this model ignores).
+
+    Everything else (``query``, ``query_json``, image prep) is reused from base.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        base_url, model, api_key = _resolve_endpoint()
+        self._base_url = base_url
+        self._api_key = api_key
+        kwargs.setdefault("model_name", model)
+        kwargs.setdefault("api_key", api_key)
+        super().__init__(**kwargs)
+
+    @cached_property
+    def _client(self) -> OpenAI:
+        return OpenAI(base_url=self._base_url, api_key=self._api_key)
+
+    def query_detections(  # type: ignore[override]
+        self, image: Image, query: str = "shelf row", **kwargs: Any
+    ) -> ImageDetections2D:
+        h, w = image.shape[:2]
+        result: ImageDetections2D = ImageDetections2D(image)
+
+        raw = self.query(image, _ROW_PROMPT)
+        try:
+            items = extract_json(raw)
+        except Exception:
+            return result
+        if not isinstance(items, list):
+            return result
+
+        for track_id, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            box = item.get("bbox_2d")
+            label = str(item.get("label", "shelf row"))
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            try:
+                nx1, ny1, nx2, ny2 = (float(v) for v in box)
+            except (TypeError, ValueError):
+                continue
+            bbox = (
+                nx1 / 1000.0 * w,
+                ny1 / 1000.0 * h,
+                nx2 / 1000.0 * w,
+                ny2 / 1000.0 * h,
+            )
+            det = Detection2DBBox(
+                bbox=bbox,
+                track_id=track_id,
+                class_id=-1,
+                confidence=1.0,
+                name=label,
+                ts=image.ts,
+                image=image,
+            )
+            if det.is_valid():
+                result.detections.append(det)
+        return result

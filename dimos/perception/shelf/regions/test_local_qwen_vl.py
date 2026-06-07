@@ -39,3 +39,61 @@ def test_resolve_endpoint_raises_without_base_url(monkeypatch):
     monkeypatch.setenv("SHELF_VLM_MODEL", "m")
     with pytest.raises(ValueError):
         _resolve_endpoint()
+
+
+from unittest.mock import MagicMock
+
+import numpy as np
+
+from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
+from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
+from dimos.perception.shelf.regions.local_qwen_vl import LocalQwenVlModel
+
+# Local Qwen returns 0-1000 normalized bbox_2d wrapped in a ```json block + chatter.
+MOCK_LOCAL_QWEN_RESPONSE = """
+Here are the shelf rows:
+```json
+[
+  {"bbox_2d": [0, 0, 1000, 500], "label": "shelf row"},
+  {"bbox_2d": [0, 500, 1000, 1000], "label": "shelf row"}
+]
+```
+Let me know if you need more.
+"""
+
+
+def _make_model(monkeypatch):
+    monkeypatch.setenv("SHELF_VLM_BASE_URL", "http://localhost:1234/v1")
+    monkeypatch.setenv("SHELF_VLM_MODEL", "qwen/qwen3.6-35b-a3b")
+    monkeypatch.setenv("SHELF_VLM_API_KEY", "x")
+    return LocalQwenVlModel()
+
+
+def test_query_detections_parses_bbox_2d_and_scales_to_pixels(monkeypatch):
+    model = _make_model(monkeypatch)
+    model.query = MagicMock(return_value=MOCK_LOCAL_QWEN_RESPONSE)
+
+    image = Image.from_numpy(np.zeros((240, 320, 3), dtype=np.uint8), format=ImageFormat.BGR)
+    dets = model.query_detections(image, "each horizontal shelf row")
+
+    assert isinstance(dets, ImageDetections2D)
+    assert len(dets) == 2
+    # 0-1000 -> pixels: W=320, H=240
+    assert dets.detections[0].bbox == (0.0, 0.0, 320.0, 120.0)
+    assert dets.detections[1].bbox == (0.0, 120.0, 320.0, 240.0)
+    assert dets.detections[0].name == "shelf row"
+    assert all(d.is_valid() for d in dets)
+
+
+def test_query_detections_empty_on_garbage(monkeypatch):
+    model = _make_model(monkeypatch)
+    model.query = MagicMock(return_value="no json here, sorry")
+    image = Image.from_numpy(np.zeros((240, 320, 3), dtype=np.uint8), format=ImageFormat.BGR)
+    dets = model.query_detections(image, "rows")
+    assert len(dets) == 0
+
+
+def test_client_uses_local_base_url(monkeypatch):
+    model = _make_model(monkeypatch)
+    client = model._client
+    assert str(client.base_url).rstrip("/") == "http://localhost:1234/v1"
