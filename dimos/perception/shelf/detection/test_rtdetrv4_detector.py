@@ -68,3 +68,32 @@ def test_real_inference_smoke():
     out = det.process_image(_img(w=640, h=480))
     assert isinstance(out, ImageDetections2D)
     assert all(d.is_valid() for d in out)
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["find_spec"]).find_spec("engine") is None,
+    reason="RT-DETRv4 (Naotchi/rt-detrv4) not installed",
+)
+def test_real_inference_smoke_cuda():
+    """Regression guard: HybridEncoder pos_embed must be moved to CUDA.
+
+    The precomputed pos_embed tensors are plain attributes (not buffers), so a
+    naive .to('cuda') leaves them on CPU and the encoder raises a device
+    mismatch. _move_precomputed_tensors fixes this.
+    """
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    from dimos.perception.shelf.detection import weights as w
+
+    try:
+        wp = w.resolve_weights("l", download=False)
+    except FileNotFoundError:
+        pytest.skip("RT-DETRv4 weights not downloaded")
+
+    det = rd.RTDetrv4Detector(model_size="l", weights=wp, device="cuda", conf=0.4)
+    out = det.process_image(_img(w=640, h=480))
+    assert isinstance(out, ImageDetections2D)
+    assert all(d.is_valid() for d in out)

@@ -78,6 +78,24 @@ def _preprocess(image: Image, device: str) -> tuple[Any, Any]:
     return im_data, orig_size
 
 
+def _move_precomputed_tensors(model: Any, device: str) -> None:
+    """Move RT-DETRv4's precomputed pos_embed tensors to ``device``.
+
+    The HybridEncoder precomputes sinusoidal position embeddings when
+    ``eval_spatial_size`` is set, but stores them as plain attributes
+    (`setattr(self, f"pos_embed{idx}", ...)`) instead of registered buffers
+    (the ``register_buffer`` line is commented out upstream). Plain tensor
+    attributes are NOT moved by ``nn.Module.to()``, so on CUDA they stay on
+    CPU and trigger a device mismatch in the encoder. Move them explicitly.
+    """
+    import torch
+
+    for module in model.modules():
+        for name, value in list(vars(module).items()):
+            if name.startswith("pos_embed") and isinstance(value, torch.Tensor):
+                setattr(module, name, value.to(device))
+
+
 class RTDetrv4Detector(Detector):
     """RT-DETRv4 dense detector exposed via dimos' Detector interface."""
 
@@ -127,7 +145,9 @@ class RTDetrv4Detector(Detector):
             def forward(self, images: Any, orig_target_sizes: Any) -> Any:
                 return self.postprocessor(self.model(images), orig_target_sizes)
 
-        return _Model().to(device).eval()
+        model = _Model().to(device).eval()
+        _move_precomputed_tensors(model, device)
+        return model
 
     def process_image(self, image: Image) -> ImageDetections2D:
         import torch
