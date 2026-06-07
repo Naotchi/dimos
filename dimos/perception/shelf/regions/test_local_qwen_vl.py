@@ -2,10 +2,43 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+from unittest.mock import MagicMock
+
+import numpy as np
 import pytest
 
-from dimos.perception.shelf.regions.local_qwen_vl import _resolve_endpoint
+from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
+from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
+from dimos.perception.shelf.regions.local_qwen_vl import LocalQwenVlModel, _resolve_endpoint
+
+# Local Qwen returns 0-1000 normalized bbox_2d wrapped in a ```json block + chatter.
+MOCK_LOCAL_QWEN_RESPONSE = """
+Here are the shelf rows:
+```json
+[
+  {"bbox_2d": [0, 0, 1000, 500], "label": "shelf row"},
+  {"bbox_2d": [0, 500, 1000, 1000], "label": "shelf row"}
+]
+```
+Let me know if you need more.
+"""
+
+
+def _make_model(monkeypatch):
+    monkeypatch.setenv("SHELF_VLM_BASE_URL", "http://localhost:1234/v1")
+    monkeypatch.setenv("SHELF_VLM_MODEL", "qwen/qwen3.6-35b-a3b")
+    monkeypatch.setenv("SHELF_VLM_API_KEY", "x")
+    return LocalQwenVlModel()
 
 
 def test_resolve_endpoint_prefers_shelf_vars(monkeypatch):
@@ -41,34 +74,6 @@ def test_resolve_endpoint_raises_without_base_url(monkeypatch):
         _resolve_endpoint()
 
 
-from unittest.mock import MagicMock
-
-import numpy as np
-
-from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
-from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
-from dimos.perception.shelf.regions.local_qwen_vl import LocalQwenVlModel
-
-# Local Qwen returns 0-1000 normalized bbox_2d wrapped in a ```json block + chatter.
-MOCK_LOCAL_QWEN_RESPONSE = """
-Here are the shelf rows:
-```json
-[
-  {"bbox_2d": [0, 0, 1000, 500], "label": "shelf row"},
-  {"bbox_2d": [0, 500, 1000, 1000], "label": "shelf row"}
-]
-```
-Let me know if you need more.
-"""
-
-
-def _make_model(monkeypatch):
-    monkeypatch.setenv("SHELF_VLM_BASE_URL", "http://localhost:1234/v1")
-    monkeypatch.setenv("SHELF_VLM_MODEL", "qwen/qwen3.6-35b-a3b")
-    monkeypatch.setenv("SHELF_VLM_API_KEY", "x")
-    return LocalQwenVlModel()
-
-
 def test_query_detections_parses_bbox_2d_and_scales_to_pixels(monkeypatch):
     model = _make_model(monkeypatch)
     model.query = MagicMock(return_value=MOCK_LOCAL_QWEN_RESPONSE)
@@ -97,3 +102,22 @@ def test_client_uses_local_base_url(monkeypatch):
     model = _make_model(monkeypatch)
     client = model._client
     assert str(client.base_url).rstrip("/") == "http://localhost:1234/v1"
+
+
+def test_query_detections_skips_malformed_items(monkeypatch):
+    model = _make_model(monkeypatch)
+    model.query = MagicMock(
+        return_value='[{}, {"bbox_2d": "bad"}, {"bbox_2d": [0, 0, 500, 500], "label": "row"}]'
+    )
+    image = Image.from_numpy(np.zeros((240, 320, 3), dtype=np.uint8), format=ImageFormat.BGR)
+    dets = model.query_detections(image, "rows")
+    assert len(dets) == 1
+    assert dets.detections[0].name == "row"
+
+
+def test_query_detections_drops_zero_area_box(monkeypatch):
+    model = _make_model(monkeypatch)
+    model.query = MagicMock(return_value='[{"bbox_2d": [500, 500, 500, 500], "label": "row"}]')
+    image = Image.from_numpy(np.zeros((240, 320, 3), dtype=np.uint8), format=ImageFormat.BGR)
+    dets = model.query_detections(image, "rows")
+    assert len(dets) == 0
