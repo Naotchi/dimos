@@ -43,22 +43,7 @@ python scripts/shelf_detect_live.py --camera 0 --serve
 python scripts/shelf_detect_live.py --camera 0 --out shelf_live.mp4 --rrd shelf_live.rrd
 ```
 
-引数: `--camera <idx>`, `--backend {rtdetrv4,yolo}`, `--weights`, `--model-size`, `--device`, `--conf`, `--serve`, `--rrd <path>`, `--out <path.mp4>`, `--max-frames N`（0=Ctrl-C まで）。
-
-### バックエンド（COCO汎用 / 既製の棚商品検出器）
-
-- `--backend rtdetrv4`（既定）: RT-DETRv4 + COCO 重み。GPU で約 30 FPS。**汎用 COCO クラス**（人/椅子等）で、棚の「商品」は商品として認識しない。
-- `--backend yolo --weights <local.pt | HFリポID>`: 任意の ultralytics YOLO を読む。**学習なしで棚商品検出**したい場合、コミュニティ既製モデルを指定:
-
-```bash
-# 既製の「商品/空き棚」検出器（foduucom, クラス: empty / product）を webカメラに
-python scripts/shelf_detect_live.py --camera 0 --backend yolo \
-  --weights foduucom/product-detection-in-shelf-yolov8 --conf 0.25 --serve
-```
-
-注意:
-- 既製 YOLO 重みは**非公式・ライセンス未記載・精度自己申告**。本番採用前に要確認。SKU-110K の**公式**学習済み重みは存在しない（公式は COCO のみ）。
-- この環境は **torchvision の CUDA NMS が無い**ため、YOLO バックエンドは自動で **CPU 実行**にフォールバックする（~7-10 FPS）。RT-DETRv4 は NMS 不要なので GPU のまま。
+引数: `--camera <idx>`, `--model-size`, `--device`, `--conf`, `--serve`, `--rrd <path>`, `--out <path.mp4>`, `--max-frames N`（0=Ctrl-C まで）。
 
 ### 使い方（Python）
 

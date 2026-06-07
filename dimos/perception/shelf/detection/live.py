@@ -7,27 +7,10 @@ from typing import Any
 import cv2
 
 from dimos.msgs.sensor_msgs.Image import Image
+from dimos.perception.shelf.detection.rtdetrv4_detector import RTDetrv4Detector
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
-
-
-def make_detector(args: argparse.Namespace) -> Any:
-    """Build the detector for the chosen backend (RT-DETRv4 or an ultralytics YOLO)."""
-    if args.backend == "yolo":
-        from dimos.perception.shelf.detection.yolo_hf_detector import YoloDetector
-
-        if not args.weights:
-            raise ValueError("--backend yolo requires --weights (local .pt or HF repo id)")
-        return YoloDetector(
-            weights=args.weights, device=args.device, conf=args.conf, hf_filename=args.hf_filename
-        )
-
-    from dimos.perception.shelf.detection.rtdetrv4_detector import RTDetrv4Detector
-
-    return RTDetrv4Detector(
-        model_size=args.model_size, weights=args.weights, device=args.device, conf=args.conf
-    )
 
 
 def detections_to_rerun_boxes(detections: Any) -> tuple[list, list, list]:
@@ -63,7 +46,9 @@ def run_live(args: argparse.Namespace) -> None:
         elif args.rrd:
             rr.save(args.rrd)
 
-    detector = make_detector(args)
+    detector = RTDetrv4Detector(
+        model_size=args.model_size, device=args.device, conf=args.conf
+    )
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
@@ -120,18 +105,6 @@ def run_live(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Live RT-DETRv4 dense detection from a webcam")
     p.add_argument("--camera", type=int, default=0, help="cv2 VideoCapture index")
-    p.add_argument(
-        "--backend",
-        default="rtdetrv4",
-        choices=["rtdetrv4", "yolo"],
-        help="detector backend: rtdetrv4 (COCO) or yolo (--weights = local .pt or HF repo id)",
-    )
-    p.add_argument(
-        "--weights",
-        default=None,
-        help="yolo: local .pt or HF repo id (e.g. foduucom/product-detection-in-shelf-yolov8)",
-    )
-    p.add_argument("--hf-filename", dest="hf_filename", default="best.pt", help="yolo: HF weight file")
     p.add_argument("--model-size", dest="model_size", default="l", choices=["s", "m", "l", "x"])
     p.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
     p.add_argument("--conf", type=float, default=0.4)
