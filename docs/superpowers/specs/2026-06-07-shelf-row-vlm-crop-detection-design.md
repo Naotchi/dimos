@@ -41,8 +41,9 @@ related:
 - RT-DETRv4 の product/price-tag fine-tune。
 - VLM 段抽出が不安定だった場合の「什器→幾何分割」ハイブリッド（フォールバック方針のみ本 spec に記載、実装は後続）。
 
-## 3. 検証済みの前提（実機エンドポイントで確認）
+## 3. 検証済みの前提 / 既存資産
 
+### 3.1 実機エンドポイントで確認したこと
 `http://localhost:1234/v1`（LM Studio, OpenAI 互換）の `qwen/qwen3.6-35b-a3b` に画像 + プロンプトを投げ、以下を確認済み：
 
 - **画像入力に対応した VLM**である（text-only ではない）。
@@ -50,13 +51,31 @@ related:
 - 出力は本文中の ```json ブロックで、要素は `{"bbox_2d": [x1,y1,x2,y2], "label": "..."}`。
 - 320×240 のテスト画像で上段/下段の2段をほぼ正確に分割 → **段直接抽出は実用上機能する**。
 
+### 3.2 既存資産（再利用する／しない）
+- **再利用する**: 基底 `dimos/models/vl/base.py` の `VlModel.query_detections(image, query) -> ImageDetections2D[Detection2DBBox]`
+  （`base.py:266`）。VLM grounding → `ImageDetections2D` 変換を、JSON パース・`query_json` の
+  リトライ・`auto_resize` スケーリング込みで実装済み。**この機構を丸ごと使う**（独自 HTTP クライアントは作らない）。
+- **そのままは使えない**: `dimos/models/vl/qwen.py` の `QwenVlModel` は **base_url が Alibaba dashscope
+  クラウドにハードコード**（`qwen.py:45`, `ALIBABA_API_KEY`, model `qwen2.5-vl-72b-instruct`）で、
+  **localhost:1234 を指していない**。base_url は config 化されておらず差し替え不可。
+  → 現状 `Detection3DModule.ask_vlm`/`nav_vlm` はローカル Spark ではなく**クラウド Alibaba を叩いている**。
+- **新規に作る**: ローカル LM Studio エンドポイントを指す **fork-local の `VlModel` サブクラス**（§4 コンポーネント1）。
+
+### 3.3 座標規約リスク（実装時に検証）
+基底 `query_detections` のプロンプトは `["label", x1, y1, x2, y2]` を**ピクセルで**要求するが、
+実機テストではローカル Qwen は **0–1000 正規化の `bbox_2d`** を返した（プロンプト指定を無視気味）。
+このまま流すと**約1000倍スケールの誤った crop**になりうる。
+→ 実装時に「ローカル Qwen が基底プロンプトのピクセル形式に従うか」を検証し、従わなければ
+fork-local サブクラス側で**プロンプト or パースを override** して 0–1000 → px 換算を入れる。
+
 ## 4. アーキテクチャ
 
 ```
 camera.color_image
    └─> Detection3DModule(detector = ShelfRowDetector)        # 新 blueprint で差し替え
           └─ ShelfRowDetector.process_image(image)            # 合成 Detector（fork 固有・新規）
-                ├─ (低頻度) QwenVLClient.detect_rows(image)    # VLM grounding → 段 bbox[]（キャッシュ）
+                ├─ (低頻度) LocalQwenVlModel.query_detections(image, "each horizontal shelf row")
+                │            # 基底 VlModel.query_detections を再利用 → 段 bbox[]（キャッシュ）
                 ├─ crop[]  = 各段 bbox で image を切り出し
                 ├─ RTDetrv4Detector.process_image(crop)        # 段ごとに dense 検出（既存・fork 固有）
                 └─ remap: crop 座標 → 全画像座標（原点 offset, row_id 付与）→ ImageDetections2D
@@ -65,16 +84,20 @@ camera.color_image
 
 ### コンポーネント（各々単独でテスト可能な単位）
 
-1. **`QwenVLClient`** — `dimos/perception/shelf/regions/qwen_vl_client.py`（新規）
-   - OpenAI 互換 `chat/completions` に画像（base64 data URL）+ 段プロンプトを投げる薄いクライアント。
-   - 応答本文から ```json を取り出し `bbox_2d` を 0–1000 → ピクセルへ換算した bbox リストを返す。
-   - **検出ロジックを持たない**（HTTP + パースのみ）。
-   - 設定は env: `SHELF_VLM_BASE_URL` / `SHELF_VLM_MODEL`（未設定なら `DIMOS_LLM_BASE_URL` /
-     `DIMOS_LLM_MODEL` にフォールバック = agent と同じ Qwen を共有）。判断① 参照。
+1. **`LocalQwenVlModel(QwenVlModel)`** — `dimos/perception/shelf/regions/local_qwen_vl.py`（新規, fork 固有）
+   - 既存 `QwenVlModel` を継承し、`_client`（OpenAI クライアント）だけ override して
+     **`base_url` / `api_key` / `model_name` を env から取得**し localhost:1234 を指す。
+   - 設定は env: `SHELF_VLM_BASE_URL` / `SHELF_VLM_MODEL` / `SHELF_VLM_API_KEY`
+     （未設定なら `DIMOS_LLM_BASE_URL` / `DIMOS_LLM_MODEL` / `DIMOS_LLM_API_KEY` にフォールバック
+     = agent と同じローカル Qwen を共有）。判断① 参照。
+   - grounding 本体（プロンプト・JSON パース・スケーリング）は**基底 `VlModel.query_detections` を再利用**。
+   - §3.3 の座標規約検証の結果、ローカル Qwen がピクセル形式に従わない場合のみ、
+     本サブクラスで `query_detections`（プロンプト/パース）を override し 0–1000 → px 換算を入れる。
 
 2. **`ShelfRowDetector(Detector)`** — `dimos/perception/shelf/regions/shelf_row_detector.py`（新規）
    - `Detector` インターフェース `process_image(image) -> ImageDetections2D` を実装。
-   - 内部に `QwenVLClient` と `RTDetrv4Detector` を保持。
+   - 内部に `LocalQwenVlModel` と `RTDetrv4Detector` を保持。
+   - 段抽出は `self.vlm.query_detections(image, "each horizontal shelf row")` を呼ぶだけ。
    - grounding 結果（段 bbox）を**キャッシュ**し、既定では初回のみ VLM を呼ぶ。判断② 参照。
    - 各段 crop に RT-DETRv4 を適用し、crop 原点 offset で全画像座標へ remap、`row_id` を付与してマージ。
    - 画像外 bbox はクランプ。
@@ -126,16 +149,19 @@ camera.color_image
 
 ## 8. テスト
 
-- `QwenVLClient`: HTTP をモックし、録画/疑似 JSON 応答（```json + bbox_2d, 0–1000 座標）から
-  ピクセル bbox への換算とパースを検証。**実エンドポイントは叩かない**。
-- `ShelfRowDetector`: `QwenVLClient` をモックし、(a) 座標換算 + crop 原点 remap が決定的に正しいこと、
+- `LocalQwenVlModel`: `_client`（OpenAI 呼び出し）をモックし、env からの base_url/model/key 解決と
+  フォールバック順（`SHELF_VLM_*` → `DIMOS_LLM_*`）、および（override する場合）0–1000 → px 換算を検証。
+  **実エンドポイントは叩かない**。
+- `ShelfRowDetector`: `LocalQwenVlModel.query_detections` をモックし、(a) crop 原点 remap が決定的に正しいこと、
   (b) 0 段フォールバック、(c) grounding キャッシュ（2回目は VLM を呼ばない）を検証。
 - 実エンドポイント結合テスト: env がある時のみ実行、無ければ skip。
 - blueprint: 既存 blueprint 生成テストに倣い、新 blueprint が組み立つ（autoconnect/transports）ことを検証。
 
 ## 9. fork 方針との整合（CLAUDE.md）
 
-- `QwenVLClient` / `ShelfRowDetector` / 新 blueprint / CLI は**すべて新規 fork 固有ファイル**。
-- upstream 由来ファイル（`module2D.py` / `module3D.py` / `Detection3DModule`）は**編集しない**
-  （注入点 `Config.detector` をそのまま利用）。
+- `LocalQwenVlModel` / `ShelfRowDetector` / 新 blueprint / CLI は**すべて新規 fork 固有ファイル**。
+- upstream 由来ファイルは**編集しない**：
+  - `module2D.py` / `module3D.py`（`Detection3DModule`）は注入点 `Config.detector` をそのまま利用。
+  - `dimos/models/vl/base.py`（`VlModel.query_detections`）/ `qwen.py`（`QwenVlModel`）は
+    **継承して再利用**（base_url の override はサブクラス側で行い、upstream は触らない）。
 - `all_blueprints` への**エントリ1行追加のみ**を最小差分として許容（ロジック改変なし）。
