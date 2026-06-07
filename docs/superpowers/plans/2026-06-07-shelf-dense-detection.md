@@ -84,13 +84,13 @@ cd /tmp/rt-detrv4 && git checkout -b add-pyproject && git add pyproject.toml && 
 git commit -m "build: add hatchling pyproject (ship engine + configs)" && \
 git push -u origin add-pyproject && git rev-parse HEAD
 ```
-Expected: コミット SHA が表示される。push 後、main へ取り込む（PR マージ or `git push origin add-pyproject:main`）。以降の `<sha>` はこの main の SHA。
+Expected: コミット SHA が表示される。push 後、main へ取り込む（PR マージ or `git push origin add-pyproject:main`）。以降の `<sha>` はこの main の SHA (= 86b20b0a68d73a93b8ee23372cb2f6c12f0dd341)。
 
 - [ ] **Step 4: dimos に依存追加**
 
 Run (in `/home/naoki/dimos`):
 ```bash
-uv add "rt-detrv4 @ git+https://github.com/Naotchi/rt-detrv4@<sha>" gdown
+uv add "rt-detrv4 @ git+https://github.com/Naotchi/rt-detrv4@86b20b0a68d73a93b8ee23372cb2f6c12f0dd341" gdown
 ```
 Expected: `pyproject.toml` / `uv.lock` 更新。torch のバージョン競合が出たら dimos 既存 pin に合わせて解決（fork の `torch` は無印なので通常追従する）。
 
@@ -762,7 +762,7 @@ Create `dimos/perception/shelf/README.md`:
 
 ### 依存
 RT-DETRv4 は `Naotchi/rt-detrv4`（fork + pyproject）として導入済み:
-`uv add "rt-detrv4 @ git+https://github.com/Naotchi/rt-detrv4@<sha>" gdown`
+`uv add "rt-detrv4 @ git+https://github.com/Naotchi/rt-detrv4@86b20b0a68d73a93b8ee23372cb2f6c12f0dd341" gdown`
 
 ### 使い方
 ```bash
