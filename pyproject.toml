@@ -134,6 +134,7 @@ dependencies = [
     "pyaudio>=0.2.14",
     "aiohttp>=3.13.5",
     "pynput>=1.8.2",
+    "rt-detrv4",
 ]
 
 
@@ -500,6 +501,7 @@ torch = [
 torchvision = [
     { index = "pytorch-cu130", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
 ]
+rt-detrv4 = { git = "https://github.com/Naotchi/rt-detrv4", rev = "86b20b0a68d73a93b8ee23372cb2f6c12f0dd341" }
 
 [tool.ruff]
 line-length = 100
