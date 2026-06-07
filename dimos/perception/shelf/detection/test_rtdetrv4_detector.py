@@ -62,6 +62,9 @@ def test_real_inference_smoke():
         pytest.skip("RT-DETRv4 weights not downloaded")
 
     det = rd.RTDetrv4Detector(model_size="l", weights=wp, device="cpu", conf=0.4)
+    # Black image: verifies the model builds + runs end-to-end and every returned
+    # detection is valid. It does not assert non-empty (a blank frame yields none);
+    # real-image coverage is the CLI full-path check documented in the README.
     out = det.process_image(_img(w=640, h=480))
     assert isinstance(out, ImageDetections2D)
     assert all(d.is_valid() for d in out)

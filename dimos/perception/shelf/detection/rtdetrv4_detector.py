@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from dimos.msgs.sensor_msgs.Image import Image
+from dimos.perception.detection.detectors.base import Detector
 from dimos.perception.detection.type.detection2d.bbox import Detection2DBBox
 from dimos.perception.detection.type.detection2d.imageDetections2D import ImageDetections2D
+from dimos.perception.shelf.detection.weights import resolve_config, resolve_weights
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
@@ -72,13 +76,6 @@ def _preprocess(image: Image, device: str) -> tuple[Any, Any]:
     im_data = transforms(pil).unsqueeze(0).to(device)
     orig_size = torch.tensor([[image.width, image.height]]).to(device)
     return im_data, orig_size
-
-
-import os
-from pathlib import Path
-
-from dimos.perception.detection.detectors.base import Detector
-from dimos.perception.shelf.detection.weights import resolve_config, resolve_weights
 
 
 class RTDetrv4Detector(Detector):
