@@ -54,6 +54,15 @@ def run_live(args: argparse.Namespace) -> None:
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open camera index {args.camera}")
 
+    # Many UVC webcams cap raw YUYV at a low resolution (e.g. 640x360) for
+    # bandwidth; switching to MJPG unlocks 720p/1080p. Set fourcc before size.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    got_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    got_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    logger.info(f"camera resolution: requested {args.width}x{args.height}, got {got_w}x{got_h}")
+
     writer = None
     frame_idx = 0
     t_prev = time.time()
@@ -105,6 +114,8 @@ def run_live(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Live RT-DETRv4 dense detection from a webcam")
     p.add_argument("--camera", type=int, default=0, help="cv2 VideoCapture index")
+    p.add_argument("--width", type=int, default=1280, help="capture width (MJPG)")
+    p.add_argument("--height", type=int, default=720, help="capture height (MJPG)")
     p.add_argument("--model-size", dest="model_size", default="l", choices=["s", "m", "l", "x"])
     p.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
     p.add_argument("--conf", type=float, default=0.4)
