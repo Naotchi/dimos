@@ -22,6 +22,27 @@ def _to_numpy(x: Any) -> np.ndarray:
     return np.asarray(x)
 
 
+_COCO_LABEL_NAMES: dict[int, str] | None = None
+
+
+def _coco_label_names() -> dict[int, str]:
+    """Map RT-DETRv4's contiguous class label (0-79) -> human-readable COCO name.
+
+    The model emits 0-79 contiguous labels (the configs use
+    ``remap_mscoco_category=False``), so we compose the engine's
+    ``mscoco_label2category`` (label -> 1-90 category id) with
+    ``mscoco_category2name`` (category id -> name). Cached after first build.
+    """
+    global _COCO_LABEL_NAMES
+    if _COCO_LABEL_NAMES is None:
+        from engine.data.dataset import mscoco_category2name, mscoco_label2category
+
+        _COCO_LABEL_NAMES = {
+            label: mscoco_category2name[cat] for label, cat in mscoco_label2category.items()
+        }
+    return _COCO_LABEL_NAMES
+
+
 def build_image_detections(
     image: Image,
     labels: Any,
@@ -42,6 +63,7 @@ def build_image_detections(
     boxes_np = _to_numpy(boxes).reshape(-1, 4)
     scores_np = _to_numpy(scores).reshape(-1)
 
+    names = _coco_label_names()
     detections: list[Detection2DBBox] = []
     for i in range(scores_np.shape[0]):
         score = float(scores_np[i])
@@ -54,7 +76,7 @@ def build_image_detections(
             track_id=-1,
             class_id=class_id,
             confidence=score,
-            name=f"class_{class_id}",
+            name=names.get(class_id, f"class_{class_id}"),
             ts=image.ts,
             image=image,
         )
