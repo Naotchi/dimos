@@ -31,7 +31,7 @@ class _FakeVlm:
         self.rows = rows
         self.calls = 0
 
-    def query_detections(self, image, query="shelf row"):
+    def query_detections(self, image, query="each horizontal shelf row"):
         self.calls += 1
         dets = ImageDetections2D(image)
         for i, (x1, y1, x2, y2) in enumerate(self.rows):
@@ -114,5 +114,56 @@ def test_falls_back_to_whole_image_when_no_rows():
     detector = ShelfRowDetector(vlm=vlm, dense_detector=dense)
     out = detector.process_image(img)
     assert dense.crops_seen == 1
+    assert len(out) == 1
+    assert out.detections[0].bbox == (5.0, 5.0, 15.0, 15.0)
+
+
+def test_reground_each_frame_requeries_every_call():
+    img = _img()
+    vlm = _FakeVlm(rows=[(0, 0, 320, 240)])
+    detector = ShelfRowDetector(
+        vlm=vlm, dense_detector=_FakeDense(), reground_each_frame=True
+    )
+    detector.process_image(img)
+    detector.process_image(img)
+    assert vlm.calls == 2
+
+
+def test_multiple_detections_per_crop_are_all_remapped():
+    img = _img(h=240, w=320)
+
+    class _MultiDense:
+        def process_image(self, crop):
+            dets = ImageDetections2D(crop)
+            for bx in (5.0, 50.0):
+                dets.detections.append(
+                    Detection2DBBox(
+                        bbox=(bx, 5.0, bx + 10.0, 15.0),
+                        track_id=0,
+                        class_id=-1,
+                        confidence=0.9,
+                        name="bottle",
+                        ts=crop.ts,
+                        image=crop,
+                    )
+                )
+            return dets
+
+    vlm = _FakeVlm(rows=[(0, 0, 320, 120), (0, 120, 320, 240)])
+    out = ShelfRowDetector(vlm=vlm, dense_detector=_MultiDense()).process_image(img)
+    # 2 rows x 2 detections each = 4
+    assert len(out) == 4
+    # row1's detections shifted down by 120
+    row1_boxes = {d.bbox for d in out if d.name.endswith("(row1)")}
+    assert (5.0, 125.0, 15.0, 135.0) in row1_boxes
+    assert (50.0, 125.0, 60.0, 135.0) in row1_boxes
+
+
+def test_out_of_bounds_vlm_box_is_clamped_not_dropped():
+    img = _img(h=240, w=320)
+    vlm = _FakeVlm(rows=[(-10, -10, 400, 300)])  # extends past image edges
+    dense = _FakeDense()
+    out = ShelfRowDetector(vlm=vlm, dense_detector=dense).process_image(img)
+    assert dense.crops_seen == 1  # clamped to a valid crop, not dropped
     assert len(out) == 1
     assert out.detections[0].bbox == (5.0, 5.0, 15.0, 15.0)

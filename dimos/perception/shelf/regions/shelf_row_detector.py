@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from dimos.msgs.sensor_msgs.Image import Image
@@ -75,6 +76,8 @@ class ShelfRowDetector(Detector):
         rows: list[tuple[int, int, int, int]] = []
         for det in dets:
             x1, y1, x2, y2 = det.bbox
+            if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                continue
             ix1 = max(0, min(int(x1), w - 1))
             iy1 = max(0, min(int(y1), h - 1))
             ix2 = max(ix1 + 1, min(int(x2), w))
@@ -93,6 +96,8 @@ class ShelfRowDetector(Detector):
             crop = image.crop(x1, y1, x2 - x1, y2 - y1)
             for det in self.dense.process_image(crop):
                 bx1, by1, bx2, by2 = det.bbox
+                # image is the full frame; bbox is remapped from crop-local to
+                # full-image coords so downstream 3D projection uses full intrinsics.
                 merged.detections.append(
                     Detection2DBBox(
                         bbox=(bx1 + x1, by1 + y1, bx2 + x1, by2 + y1),
