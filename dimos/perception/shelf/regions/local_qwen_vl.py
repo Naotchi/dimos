@@ -9,8 +9,9 @@ import os
 def _resolve_endpoint() -> tuple[str, str, str]:
     """Resolve (base_url, model, api_key) from env.
 
-    Prefers SHELF_VLM_* (shelf-specific override) and falls back to the agent's
-    DIMOS_LLM_* so the shelf grounding shares the same local Qwen by default.
+    Prefers SHELF_VLM_* (shelf-specific override) and falls back to the
+    project-wide DIMOS_LLM_* variables so the shelf grounding shares the same
+    local Qwen as the agent by default.
     """
     base_url = os.getenv("SHELF_VLM_BASE_URL") or os.getenv("DIMOS_LLM_BASE_URL")
     model = os.getenv("SHELF_VLM_MODEL") or os.getenv("DIMOS_LLM_MODEL")
