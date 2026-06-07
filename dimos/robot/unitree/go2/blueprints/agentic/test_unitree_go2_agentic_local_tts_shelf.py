@@ -15,11 +15,12 @@
 
 
 def test_shelf_blueprint_importable_and_built():
+    from dimos.core.coordination.blueprints import Blueprint
     from dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_local_tts_shelf import (
         unitree_go2_agentic_local_tts_shelf,
     )
 
-    assert unitree_go2_agentic_local_tts_shelf is not None
+    assert isinstance(unitree_go2_agentic_local_tts_shelf, Blueprint)
 
 
 def test_shelf_blueprint_registered():
