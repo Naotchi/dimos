@@ -33,12 +33,16 @@ def run_live(args: argparse.Namespace) -> None:
         rr.init("shelf_dense_detection")
         if args.serve:
             # rerun 0.32: serve data over gRPC, then serve a web viewer that connects to it.
+            # NOTE: `connect_to` only auto-connects when open_browser=True, so we also print
+            # an explicit "?url=" link the user can paste if the browser doesn't auto-open.
+            from urllib.parse import quote
+
             server_uri = rr.serve_grpc()
-            rr.serve_web_viewer(web_port=args.web_port, open_browser=False, connect_to=server_uri)
-            logger.info(
-                f"rerun web viewer on http://<this-host>:{args.web_port} "
-                f"(data stream: {server_uri}) — open it in a browser"
+            rr.serve_web_viewer(
+                web_port=args.web_port, open_browser=args.open_browser, connect_to=server_uri
             )
+            viewer_url = f"http://localhost:{args.web_port}/?url={quote(server_uri, safe='')}"
+            logger.info(f"rerun web viewer — open this URL in a browser:\n  {viewer_url}")
         elif args.rrd:
             rr.save(args.rrd)
 
@@ -107,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rrd", default=None, help="save a rerun .rrd recording to this path")
     p.add_argument("--serve", action="store_true", help="serve a live rerun web viewer")
     p.add_argument("--web-port", dest="web_port", type=int, default=9090, help="rerun web viewer port")
+    p.add_argument(
+        "--open-browser",
+        dest="open_browser",
+        action="store_true",
+        help="auto-open the default browser to the viewer (needs a desktop session)",
+    )
     p.add_argument("--out", default=None, help="write an annotated .mp4 to this path")
     p.add_argument("--max-frames", dest="max_frames", type=int, default=0, help="0 = run until Ctrl-C")
     return p
