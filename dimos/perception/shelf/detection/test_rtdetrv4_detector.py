@@ -44,3 +44,24 @@ def test_preprocess_shapes():
     im_data, orig_size = rd._preprocess(image, "cpu")
     assert tuple(im_data.shape) == (1, 3, 640, 640)
     assert orig_size.tolist() == [[800, 600]]
+
+
+import pytest
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["find_spec"]).find_spec("engine") is None,
+    reason="RT-DETRv4 (Naotchi/rt-detrv4) not installed",
+)
+def test_real_inference_smoke():
+    from dimos.perception.shelf.detection import weights as w
+
+    try:
+        wp = w.resolve_weights("l", download=False)
+    except FileNotFoundError:
+        pytest.skip("RT-DETRv4 weights not downloaded")
+
+    det = rd.RTDetrv4Detector(model_size="l", weights=wp, device="cpu", conf=0.4)
+    out = det.process_image(_img(w=640, h=480))
+    assert isinstance(out, ImageDetections2D)
+    assert all(d.is_valid() for d in out)
