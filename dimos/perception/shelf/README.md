@@ -29,6 +29,20 @@ python scripts/shelf_detect.py path/to/shelf.jpg --model-size l --out out/
 引数: `images...`, `--model-size {s,m,l,x}`, `--weights <path>`, `--device {cuda,cpu}`, `--conf`, `--out`。
 `DIMOS_RTDETRV4_DIR` で重みキャッシュ先を変更可能。
 
+### 使い方（ライブ USB カメラ）
+
+GPU（CUDA）で約 30 FPS。`cv2.imshow` は使えない（OpenCV GUI 非搭載）ため、表示は rerun か mp4 で行う。
+
+```bash
+# rerun web ビューアでライブ表示（表示された URL をブラウザで開く）
+python scripts/shelf_detect_live.py --camera 0 --serve
+
+# 注釈付き mp4 と rerun 録画(.rrd)を保存（後で `rerun shelf_live.rrd` で再生）
+python scripts/shelf_detect_live.py --camera 0 --out shelf_live.mp4 --rrd shelf_live.rrd
+```
+
+引数: `--camera <idx>`, `--model-size`, `--device`, `--conf`, `--serve`, `--rrd <path>`, `--out <path.mp4>`, `--max-frames N`（0=Ctrl-C まで）。
+
 ### 使い方（Python）
 
 ```python
