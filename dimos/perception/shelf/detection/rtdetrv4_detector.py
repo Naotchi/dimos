@@ -57,3 +57,18 @@ def build_image_detections(
         if det.is_valid():
             detections.append(det)
     return ImageDetections2D(image=image, detections=detections)
+
+
+def _preprocess(image: Image, device: str) -> tuple[Any, Any]:
+    """PIL RGB -> Resize(640) -> ToTensor -> (im_data[1,3,640,640], orig_size[[w,h]])."""
+    import cv2
+    from PIL import Image as PILImage
+    import torch
+    import torchvision.transforms as T
+
+    rgb = cv2.cvtColor(image.to_opencv(), cv2.COLOR_BGR2RGB)
+    pil = PILImage.fromarray(rgb)
+    transforms = T.Compose([T.Resize((640, 640)), T.ToTensor()])
+    im_data = transforms(pil).unsqueeze(0).to(device)
+    orig_size = torch.tensor([[image.width, image.height]]).to(device)
+    return im_data, orig_size

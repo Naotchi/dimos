@@ -37,3 +37,10 @@ def test_build_drops_out_of_bounds_boxes():
 
 def test_to_numpy_accepts_list():
     assert rd._to_numpy([1, 2, 3]).tolist() == [1, 2, 3]
+
+
+def test_preprocess_shapes():
+    image = _img(w=800, h=600)
+    im_data, orig_size = rd._preprocess(image, "cpu")
+    assert tuple(im_data.shape) == (1, 3, 640, 640)
+    assert orig_size.tolist() == [[800, 600]]
