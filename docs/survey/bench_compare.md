@@ -44,7 +44,7 @@ TTS（VOICEVOX）・LLM（gpt-4o, cloud）は固定。
 | `gpt4o` | `large-v3` | true | voicevox | ✅ 計測済み |
 | `gpt4o-stt-medium` | `medium` | true | voicevox | ✅ 計測済み |
 | `gpt4o-stt-small` | `small` | true | voicevox | ✅ 計測済み |
-| （TTS `openai`） | – | – | openai | ⬜ 未計測 |
+| `gpt4o-tts-openai` | large-v3 | true | openai | ❌ 失敗（Azure に TTS デプロイ無し / 404）→ §6.1 |
 
 差分は STT モデル名のみ（他フィールドは `gpt4o.json` と同一）。
 
@@ -154,8 +154,18 @@ timeout: なし
 
 - **精度（CER）未評価**: 本計測は速度のみ。fixtures には期待 `text` があるが、bench ログは `text_len` のみで文字起こし全文を保存しないため、accuracy 比較は別途ハーネスが必要。小モデルほど速いが精度は要確認。
 - **GPU STT 未計測**: 6 GB VRAM の制約で `large-v3` は CPU 固定。`medium`/`small` は GPU に載る（GPU 実行なら STT は数秒未満が期待される）が、本計測は CPU。GPU 実行での再計測が STT 高速化の本命。
-- **TTS バックエンド比較未実施**: TTS impl は `voicevox` / `openai` の 2 択（`speak_skill_ja.py`）。本レポートは voicevox 固定。`openai` TTS は OpenAI 互換 TTS エンドポイントの資格情報が必要で未検証。
+- **TTS バックエンド比較は `openai` 側が実行不可（§6.1）**: TTS impl は `voicevox` / `openai` の 2 択（`speak_skill_ja.py`）。本レポートのレイテンシ計測はすべて voicevox。`openai` は下記理由で音声が出ず、計測できなかった。
 - **サンプル数**: 各条件 1 run（30 ターン, warmup 除く）。`medium` のみ 2 run あり、STT/e2e はほぼ一致（run 間ばらつきは小さい）。
+
+### 6.1 OpenAI TTS 実行不可（負の結果）
+
+`gpt4o-tts-openai`（`impl: openai`, `openai_model: tts-1`, `openai_voice: echo`）を実行したが、**音声は一切出力されなかった**。
+
+- `OpenAITTSNode`（`dimos/stream/audio/tts/node_openai.py:78`）は `OpenAI(api_key=None)` で base_url を渡さないため、openai SDK が env の `OPENAI_API_KEY`/`OPENAI_BASE_URL` を参照する。これは bench の `endpoint: cloud` ミラーにより **gpt-4o LLM と同じ Azure エンドポイント**を指す。
+- その Azure リソースには chat デプロイメントはあるが **TTS/speech デプロイメントが無い**ため、`speak` のたびに `404 DeploymentNotFound` が返る（最新 run で 84 回）。
+- bench は per-`speak` の TTS 例外を握りつぶして継続するため、**30 ターン完走・exit 0 になるが `first_audio_out` は 0 件**（音声なし）。「完走」≠「TTS 成功」である点に注意。
+
+**計測するには**: (a) Azure リソースに TTS デプロイ（`tts-1` / `gpt-4o-mini-tts` 等）を追加し `openai_model` をそのデプロイ名にする、または (b) fork ファイル `speak_skill_ja.py` の `_make_tts_node` を改修し、LLM とは別の api_key/base_url（例 `DIMOS_TTS_OPENAI_*`）を `OpenAITTSNode` に渡して本家 OpenAI を指す。いずれか未対応の間は TTS 比較は VOICEVOX 内（`voicevox.speaker_id` 等）に限られる。
 
 ---
 
@@ -196,5 +206,6 @@ CUDA_VISIBLE_DEVICES="" .venv/bin/python scripts/bench_llm.py \
 | `large-v3` / voicevox / CPU | `logs/2026-06-09-100406-unitree-go2-agentic-local-tts-detection-gpt4o` |
 | `medium` / voicevox / CPU | `logs/2026-06-09-132935-unitree-go2-agentic-local-tts-detection-gpt4o-stt-medium` |
 | `small` / voicevox / CPU | `logs/2026-06-09-134649-unitree-go2-agentic-local-tts-detection-gpt4o-stt-small` |
+| `openai` TTS（❌ 404, 音声なし） | `logs/2026-06-10-031540-unitree-go2-agentic-local-tts-detection-gpt4o-tts-openai` |
 
 各 run ディレクトリに `bench.yaml` / `profile_config.json` / `resolved_config.json` / `main.jsonl`（イベントログ）が同梱される。集計は `main.jsonl` の `t`（単調時刻）差分から算出。
