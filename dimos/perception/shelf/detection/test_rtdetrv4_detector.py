@@ -22,7 +22,7 @@ def test_build_filters_by_conf_and_builds_detections():
     assert first.bbox == (10.0, 10.0, 50.0, 50.0)
     assert first.confidence == 0.9
     assert first.class_id == 0
-    assert first.name == "class_0"
+    assert first.name == "person"  # COCO label 0
     assert first.track_id == -1
 
 
