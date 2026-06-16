@@ -29,6 +29,24 @@ python scripts/shelf_detect.py path/to/shelf.jpg --model-size l --out out/
 引数: `images...`, `--model-size {s,m,l,x}`, `--weights <path>`, `--device {cuda,cpu}`, `--conf`, `--out`。
 `DIMOS_RTDETRV4_DIR` で重みキャッシュ先を変更可能。
 
+標準出力には画像ごとの検出件数が出る:
+
+```text
+bus: 5 detections
+```
+
+`out/<stem>.json` は検出ごとの 1 レコード（COCO 名でラベル付け、`class_<id>` ではない）:
+
+```json
+[
+  {"name": "bus",    "class": "5", "track": "-1", "conf": "0.93", "bbox": "[10,228,805,725]"},
+  {"name": "person", "class": "0", "track": "-1", "conf": "0.91", "bbox": "[48,398,246,906]"}
+]
+```
+
+キーは `name` / `class`（class_id）/ `track`（track_id, 単発検出では `-1`）/ `conf` / `bbox`（`[x1,y1,x2,y2]`）。
+あわせて `out/<stem>_annotated.jpg`（bbox + `name conf` ラベル描画）が生成される。
+
 ### 使い方（ライブ USB カメラ）
 
 GPU（CUDA）で約 30 FPS。`cv2.imshow` は使えない（OpenCV GUI 非搭載）ため、表示は rerun か mp4 で行う。
