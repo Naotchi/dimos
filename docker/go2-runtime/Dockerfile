@@ -32,6 +32,6 @@ RUN git clone --branch "${DIMOS_REF}" --single-branch "${DIMOS_REPO}" /opt/dimos
 
 WORKDIR /opt/dimos
 
-RUN uv sync --extra unitree
+RUN uv sync --extra unitree --no-default-groups --locked
 
 CMD ["bash"]

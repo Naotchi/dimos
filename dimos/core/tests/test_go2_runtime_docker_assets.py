@@ -25,6 +25,7 @@ def _dockerfile_packages(text: str) -> set[str]:
 def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     text = DOCKERFILE.read_text()
     packages = _dockerfile_packages(text)
+    lines = {line.strip() for line in text.splitlines()}
 
     assert "ARG FROM_IMAGE=ubuntu:22.04" in text
     assert "ARG DIMOS_REPO=" in text
@@ -33,7 +34,7 @@ def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     assert {"libgl1", "libgl1-mesa-dri"} <= packages
     assert "libturbojpeg0-dev" in packages
     assert "git clone --branch" in text
-    assert "uv sync --extra unitree" in text
+    assert "RUN uv sync --extra unitree --no-default-groups --locked" in lines
     assert 'ENV UV_PROJECT_ENVIRONMENT="/opt/dimos/.venv"' in text
     assert "WORKDIR /opt/dimos" in text
     assert 'CMD ["bash"]' in text

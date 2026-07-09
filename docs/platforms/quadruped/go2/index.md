@@ -109,6 +109,8 @@ docker run --rm -it --network host dimos-go2-runtime \
 
 ### What's Running
 
+The table below describes the standard `dimos run unitree-go2` stack, not the minimal `unitree-go2-basic` Docker command shown above.
+
 | Module | What It Does |
 |--------|-------------|
 | **GO2Connection** | WebRTC connection to the robot — streams LiDAR, video, odometry |
