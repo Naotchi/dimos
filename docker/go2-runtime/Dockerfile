@@ -7,10 +7,12 @@ ARG DIMOS_REF=main
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
+    build-essential \
     ca-certificates \
     curl \
     git \
     gnupg2 \
+    portaudio19-dev \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \

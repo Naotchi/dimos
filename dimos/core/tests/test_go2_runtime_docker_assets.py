@@ -12,6 +12,8 @@ def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     assert "ARG FROM_IMAGE=ubuntu:22.04" in text
     assert "ARG DIMOS_REPO=" in text
     assert "ARG DIMOS_REF=" in text
+    assert "build-essential" in text
+    assert "portaudio19-dev" in text
     assert "git clone --branch" in text
     assert "uv sync --extra unitree" in text
     assert 'ENV UV_PROJECT_ENVIRONMENT="/opt/dimos/.venv"' in text
