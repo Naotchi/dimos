@@ -87,6 +87,26 @@ dimos run unitree-go2
 
 That's it. DimOS connects via WebRTC (no jailbreak required), starts the full navigation stack, and opens the command center in your browser.
 
+### Docker on the Docking Station
+
+If the docking station host image is older than the recommended Ubuntu version, run DimOS in a container with Ubuntu 22.04 userspace.
+
+Build the runtime image on the docking station host:
+
+```bash
+docker build -f docker/go2-runtime/Dockerfile \
+  --build-arg DIMOS_REPO=https://github.com/dimensionalOS/dimos.git \
+  --build-arg DIMOS_REF=main \
+  -t dimos-go2-runtime .
+```
+
+Run the minimal Go2 blueprint with host networking:
+
+```bash
+docker run --rm -it --network host dimos-go2-runtime \
+  dimos --viewer none run unitree-go2-basic --robot-ip <YOUR_GO2_IP>
+```
+
 ### What's Running
 
 | Module | What It Does |
