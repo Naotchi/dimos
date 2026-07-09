@@ -30,7 +30,7 @@ def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     assert "ARG FROM_IMAGE=ubuntu:22.04" in text
     assert "ARG DIMOS_REPO=" in text
     assert "ARG DIMOS_REF=" in text
-    assert {"build-essential", "portaudio19-dev"} <= packages
+    assert {"build-essential", "gnupg2", "portaudio19-dev"} <= packages
     assert {"libgl1", "libgl1-mesa-dri"} <= packages
     assert "libturbojpeg0-dev" in packages
     assert "git clone --branch" in text
