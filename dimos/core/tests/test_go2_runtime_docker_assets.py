@@ -6,14 +6,32 @@ DOCKERFILE = REPO_ROOT / "docker" / "go2-runtime" / "Dockerfile"
 GO2_DOC = REPO_ROOT / "docs" / "platforms" / "quadruped" / "go2" / "index.md"
 
 
+def _dockerfile_packages(text: str) -> set[str]:
+    packages: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("ARG ", "FROM ", "RUN ", "ENV ", "WORKDIR ", "CMD ")):
+            continue
+        if stripped.startswith(("&&", "#")):
+            continue
+
+        package = stripped.removesuffix("\\").strip()
+        if package:
+            packages.add(package)
+
+    return packages
+
+
 def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     text = DOCKERFILE.read_text()
+    packages = _dockerfile_packages(text)
 
     assert "ARG FROM_IMAGE=ubuntu:22.04" in text
     assert "ARG DIMOS_REPO=" in text
     assert "ARG DIMOS_REF=" in text
-    assert "build-essential" in text
-    assert "portaudio19-dev" in text
+    assert {"build-essential", "portaudio19-dev"} <= packages
+    assert {"libgl1", "libgl1-mesa-dri"} <= packages
+    assert "libturbojpeg0-dev" in packages
     assert "git clone --branch" in text
     assert "uv sync --extra unitree" in text
     assert 'ENV UV_PROJECT_ENVIRONMENT="/opt/dimos/.venv"' in text

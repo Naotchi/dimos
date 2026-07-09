@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     gnupg2 \
+    libgl1 \
+    libgl1-mesa-dri \
+    libturbojpeg0-dev \
     portaudio19-dev \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
