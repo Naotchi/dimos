@@ -65,6 +65,7 @@ yolo11n.pt
 .envrc
 .claude/settings.local.json
 .claude/worktrees/
+.worktrees/
 **/CLAUDE.md
 !/CLAUDE.md
 .direnv/
