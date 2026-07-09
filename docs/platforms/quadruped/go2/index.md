@@ -104,7 +104,7 @@ Run the minimal Go2 blueprint with host networking:
 
 ```bash
 docker run --rm -it --network host dimos-go2-runtime \
-  dimos --viewer none run unitree-go2-basic --robot-ip <YOUR_GO2_IP>
+  dimos --robot-ip <YOUR_GO2_IP> --viewer none run unitree-go2-basic
 ```
 
 ### What's Running

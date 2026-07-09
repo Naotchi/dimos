@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     gnupg2 \
+    libgfortran5 \
     libgl1 \
     libgl1-mesa-dri \
     libturbojpeg0-dev \
