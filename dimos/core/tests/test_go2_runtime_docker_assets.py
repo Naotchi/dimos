@@ -34,7 +34,7 @@ def test_go2_runtime_dockerfile_contains_required_runtime_contract() -> None:
     assert {"libgl1", "libgl1-mesa-dri"} <= packages
     assert "libturbojpeg0-dev" in packages
     assert "git clone --branch" in text
-    assert "RUN uv sync --extra unitree --no-default-groups --locked" in lines
+    assert "RUN uv sync --extra unitree --no-default-groups" in lines
     assert 'ENV UV_PROJECT_ENVIRONMENT="/opt/dimos/.venv"' in text
     assert "WORKDIR /opt/dimos" in text
     assert 'CMD ["bash"]' in text
