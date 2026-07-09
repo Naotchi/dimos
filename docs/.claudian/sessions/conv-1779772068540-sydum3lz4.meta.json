@@ -1,0 +1,24 @@
+{
+  "id": "conv-1779772068540-sydum3lz4",
+  "providerId": "claude",
+  "title": "Convert to image and save",
+  "titleGenerationStatus": "success",
+  "createdAt": 1779772068554,
+  "updatedAt": 1779772370074,
+  "lastResponseAt": 1779772370074,
+  "sessionId": "2a471805-c5a4-47c9-a080-a3f1e393c806",
+  "providerState": {
+    "providerSessionId": "2a471805-c5a4-47c9-a080-a3f1e393c806"
+  },
+  "currentNote": "misc/go2-agentic-local-tts-pipeline-simple.canvas",
+  "usage": {
+    "model": "opus",
+    "inputTokens": 1,
+    "cacheCreationInputTokens": 218,
+    "cacheReadInputTokens": 45609,
+    "contextWindow": 1000000,
+    "contextTokens": 45828,
+    "percentage": 5,
+    "contextWindowIsAuthoritative": true
+  }
+}
