@@ -19,3 +19,7 @@ dimos --simulation run unitree-go2-basic
 STA / AP modeをアプリで切り替える。切り替え後はアプリを落とす。
 ### STA
 ### AP
+  sudo ip link set lo multicast on
+  $ sudo ip route add 224.0.0.0/4 dev lo
+  LLMの設定: windowとthinking無効化
+  voicevox起動
