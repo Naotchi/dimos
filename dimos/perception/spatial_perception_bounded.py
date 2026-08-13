@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dimos.perception.spatial_perception import SpatialConfig, SpatialMemory
+from dimos.perception.experimental.spatial_perception import SpatialConfig, SpatialMemory
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()

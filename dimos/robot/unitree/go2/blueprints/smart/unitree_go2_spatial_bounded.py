@@ -17,7 +17,7 @@
 
 from dimos.core.coordination.blueprints import autoconnect
 from dimos.experimental.security_demo.security_module import SecurityModule
-from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
+from dimos.perception.experimental.perceive_loop_skill import PerceiveLoopSkill
 from dimos.perception.spatial_perception_bounded import SpatialMemoryBounded
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2 import unitree_go2
 from dimos.robot.unitree.go2.connection import GO2Connection

@@ -21,8 +21,8 @@ FastAPI WebSocket server.  Transforms from WebXR to robot frame, computes
 deltas, and publishes PoseStamped commands.
 """
 
+import asyncio
 from dataclasses import dataclass
-from enum import IntEnum
 from pathlib import Path
 import threading
 import time
@@ -34,27 +34,22 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from dimos.constants import DIMOS_PROJECT_ROOT
 from dimos.core.core import rpc
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.stream import Out
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.sensor_msgs.Joy import Joy
-from dimos.teleop.quest.quest_types import Buttons, QuestControllerState
+
+# Hand is re-exported for back-compat; it lives in quest_types.
+from dimos.teleop.quest.quest_types import Buttons, Hand, QuestControllerState
 from dimos.teleop.utils.teleop_transforms import webxr_to_robot
 from dimos.utils.logging_config import setup_logger
-from dimos.utils.path_utils import get_project_root
 from dimos.web.robot_web_interface import RobotWebInterface
 
 logger = setup_logger()
 
 STATIC_DIR = Path(__file__).parent / "web" / "static"
-
-
-class Hand(IntEnum):
-    """Controller hand index."""
-
-    LEFT = 0
-    RIGHT = 1
 
 
 @dataclass
@@ -88,7 +83,7 @@ class QuestTeleopModule(Module):
     Outputs:
         - left_controller_output: PoseStamped (output pose for left hand)
         - right_controller_output: PoseStamped (output pose for right hand)
-        - buttons: Buttons (button states for both controllers)
+        - teleop_buttons: Buttons (button states for both controllers)
     """
 
     config: QuestTeleopConfig
@@ -96,7 +91,7 @@ class QuestTeleopModule(Module):
     # Outputs: delta poses for each controller
     left_controller_output: Out[PoseStamped]
     right_controller_output: Out[PoseStamped]
-    buttons: Out[Buttons]
+    teleop_buttons: Out[Buttons]
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -115,8 +110,8 @@ class QuestTeleopModule(Module):
         self._control_loop_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        # Embedded web server — RobotWebInterface provides FastAPI app + run()/shutdown()
-        self._web_server = RobotWebInterface(port=self.config.server_port)
+        # Embedded web server, initialized during the module start lifecycle.
+        self._web_server: RobotWebInterface | None = None
         self._web_server_thread: threading.Thread | None = None
 
         # Fingerprint-based message dispatch table
@@ -125,10 +120,16 @@ class QuestTeleopModule(Module):
             LCMJoy._get_packed_fingerprint(): self._on_joy_bytes,
         }
 
-        self._setup_routes()
+        # Tracked here so subclasses can push from non-asyncio threads.
+        # _clients_lock guards add/discard/snapshot of the set across the
+        # uvicorn thread and the RX subscriber thread.
+        self._connected_clients: set[WebSocket] = set()
+        self._clients_lock = threading.Lock()
+        self._ws_loop: asyncio.AbstractEventLoop | None = None
 
     def _setup_routes(self) -> None:
         """Register teleop routes on the embedded web server."""
+        assert self._web_server is not None
 
         @self._web_server.app.get("/teleop", response_class=HTMLResponse)
         async def teleop_index() -> HTMLResponse:
@@ -143,6 +144,9 @@ class QuestTeleopModule(Module):
         @self._web_server.app.websocket("/ws")
         async def websocket_endpoint(ws: WebSocket) -> None:
             await ws.accept()
+            self._ws_loop = asyncio.get_running_loop()
+            with self._clients_lock:
+                self._connected_clients.add(ws)
             logger.info("Quest client connected")
             try:
                 while True:
@@ -157,10 +161,15 @@ class QuestTeleopModule(Module):
                 logger.info("Quest client disconnected")
             except Exception:
                 logger.exception("WebSocket error")
+            finally:
+                with self._clients_lock:
+                    self._connected_clients.discard(ws)
 
     @rpc
     def start(self) -> None:
         super().start()
+        self._web_server = RobotWebInterface(host="0.0.0.0", port=self.config.server_port)
+        self._setup_routes()
         self._start_server()
         self._start_control_loop()
         logger.info("Quest Teleoperation Module started")
@@ -239,9 +248,12 @@ class QuestTeleopModule(Module):
             logger.warning("Web server already running")
             return
 
+        if self._web_server is None:
+            return
+
         self._web_server_thread = threading.Thread(
             target=self._web_server.run,
-            kwargs={"ssl": True, "ssl_certs_dir": get_project_root() / "assets" / "teleop_certs"},
+            kwargs={"ssl": True, "ssl_certs_dir": DIMOS_PROJECT_ROOT / "assets" / "teleop_certs"},
             daemon=True,
             name="QuestTeleopWebServer",
         )
@@ -250,6 +262,8 @@ class QuestTeleopModule(Module):
 
     def _stop_server(self) -> None:
         """Shutdown the embedded web server."""
+        if self._web_server is None:
+            return
         self._web_server.shutdown()
         if self._web_server_thread is not None:
             self._web_server_thread.join(timeout=3)
@@ -378,4 +392,4 @@ class QuestTeleopModule(Module):
         keep analog values, add extra streams).
         """
         buttons = Buttons.from_controllers(left, right)
-        self.buttons.publish(buttons)
+        self.teleop_buttons.publish(buttons)

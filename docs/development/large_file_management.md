@@ -1,4 +1,6 @@
-# Data Loading
+---
+title: "Data Loading"
+---
 
 The [`get_data`](/dimos/utils/data.py) function provides access to test data and model files, handling Git LFS downloads automatically.
 
@@ -20,7 +22,8 @@ Exists: True
 
 ## How It Works
 
-<details><summary>Pikchr</summary>
+<details>
+<summary>Pikchr</summary>
 
 ```pikchr fold output=assets/get_data_flow.svg
 color = white
@@ -78,8 +81,7 @@ checkpoint = model_dir / "yolo11n.pt"
 print(f"Checkpoint: {checkpoint.name} ({checkpoint.stat().st_size // 1024}KB)")
 ```
 
-<!--Result:-->
-```
+```results
 Checkpoint: yolo11n.pt (5482KB)
 ```
 
@@ -95,8 +97,7 @@ print(f"Replay {replay} loaded from: {data_dir.name}")
 print(replay.find_closest_seek(1))
 ```
 
-<!--Result:-->
-```
+```results
 Replay <dimos.utils.testing.replay.TimedSensorReplay object at 0x7fdc24c708f0> loaded from: unitree_office_walk
 {'type': 'msg', 'topic': 'rt/utlidar/voxel_map_compressed', 'data': {'stamp': 1751591000.0, 'frame_id': 'odom', 'resolution': 0.05, 'src_size': 77824, 'origin': [-3.625, -3.275, -0.575], 'width': [128, 128, 38], 'data': {'points': array([[ 2.725, -1.025, -0.575],
        [ 2.525, -0.275, -0.575],
@@ -117,8 +118,7 @@ pointcloud = read_pointcloud(get_data("apartment") / "sum.ply")
 print(f"Loaded pointcloud with {len(pointcloud.points)} points")
 ```
 
-<!--Result:-->
-```
+```results
 Loaded pointcloud with 63672 points
 ```
 
@@ -126,7 +126,8 @@ Loaded pointcloud with 63672 points
 
 Data files live in `data/` at the repo root. Large files are stored in `data/.lfs/` as `.tar.gz` archives tracked by Git LFS.
 
-<details><summary>Diagram</summary>
+<details>
+<summary>Diagram</summary>
 
 ```diagon fold mode=Tree
 data/
@@ -200,3 +201,15 @@ When running from:
   - Linux: `~/.local/share/dimos/repo/data/`
   - macOS: `~/Library/Application Support/dimos/repo/data/`
   - Fallback: `/tmp/dimos/repo/data/`
+
+## Docs media assets
+
+Binary media displayed by the docs (screenshots, plots, GIFs) is LFS-tracked here under `docs/**/assets/`, but Mintlify deploys the docs site without fetching Git LFS.
+
+So content behind those LFS pointers is hosted as plain git blobs in [dimensionalOS/dimos-docs-assets](https://github.com/dimensionalOS/dimos-docs-assets) (mirroring the `docs` tree, minus the `docs/` prefix), and docs pages reference that copy with an absolute URL:
+
+```markdown
+![Coverage](https://raw.githubusercontent.com/dimensionalOS/dimos-docs-assets/main/capabilities/navigation/assets/coverage.png)
+```
+
+Small text SVGs emitted by pikchr and `to_svg` are exempt: they are committed here as plain text and referenced relatively.

@@ -14,11 +14,12 @@
 
 """Connected hardware for the ControlCoordinator.
 
-Provides two wrapper types:
+Provides runtime wrappers for coordinator-managed hardware:
 - ConnectedHardware: Wraps ManipulatorAdapter for joint-controlled arms
 - ConnectedTwistBase: Wraps TwistBaseAdapter for velocity-commanded platforms
+- ConnectedWholeBody: Wraps WholeBodyAdapter for full-body motor control
 
-Both share the same duck-type interface (read_state, write_command, etc.)
+They share the same duck-type interface (read_state, write_command, etc.)
 so the tick loop treats them uniformly.
 """
 
@@ -60,6 +61,10 @@ class ConnectedHardware:
         self._arm_joint_names: list[JointName] = list(component.joints)
         self._gripper_joints: list[JointName] = list(component.gripper_joints)
         self._joint_names: list[JointName] = component.all_joints
+        self._gripper_open = component.gripper_open_position
+        self._gripper_closed = component.gripper_closed_position
+        if (self._gripper_open is None) != (self._gripper_closed is None):
+            raise ValueError("gripper open/closed positions must be set together")
 
         # Track last commanded values for hold-last behavior
         self._last_commanded: dict[str, float] = {}
@@ -122,7 +127,9 @@ class ConnectedHardware:
             gripper_pos = self._adapter.read_gripper_position()
             for gj in self._gripper_joints:
                 result[gj] = JointState(
-                    position=gripper_pos if gripper_pos is not None else 0.0,
+                    position=self._physical_to_normalized(gripper_pos)
+                    if gripper_pos is not None
+                    else 0.0,
                     velocity=0.0,
                     effort=0.0,
                 )
@@ -187,7 +194,10 @@ class ConnectedHardware:
         for gj in self._gripper_joints:
             if gj in self._last_commanded:
                 gripper_ok = (
-                    self._adapter.write_gripper_position(self._last_commanded[gj]) and gripper_ok
+                    self._adapter.write_gripper_position(
+                        self._normalized_to_physical(self._last_commanded[gj])
+                    )
+                    and gripper_ok
                 )
 
         return arm_ok and gripper_ok
@@ -204,7 +214,11 @@ class ConnectedHardware:
                 if self._gripper_joints:
                     gripper_pos = self._adapter.read_gripper_position()
                     for gj in self._gripper_joints:
-                        self._last_commanded[gj] = gripper_pos if gripper_pos is not None else 0.0
+                        self._last_commanded[gj] = (
+                            self._physical_to_normalized(gripper_pos)
+                            if gripper_pos is not None
+                            else 0.0
+                        )
 
                 self._initialized = True
                 return
@@ -214,6 +228,20 @@ class ConnectedHardware:
         raise RuntimeError(
             f"Hardware {self.hardware_id} failed to read initial positions after retries"
         )
+
+    def _normalized_to_physical(self, value: float) -> float:
+        """Map normalized input to adapter-native endpoint units."""
+        if self._gripper_open is None or self._gripper_closed is None:
+            return value
+        value = max(0.0, min(1.0, value))
+        return self._gripper_closed + (self._gripper_open - self._gripper_closed) * value
+
+    def _physical_to_normalized(self, value: float) -> float:
+        """Map adapter-native endpoint units back to normalized input."""
+        if self._gripper_open is None or self._gripper_closed is None:
+            return value
+        span = self._gripper_open - self._gripper_closed
+        return 0.0 if span == 0.0 else max(0.0, min(1.0, (value - self._gripper_closed) / span))
 
     def _build_ordered_command(self) -> list[float]:
         """Build ordered command list from last_commanded dict."""
@@ -332,6 +360,34 @@ class ConnectedWholeBody(ConnectedHardware):
         self._component = component
         self._joint_names = component.joints
 
+        # Resolve per-joint PD gains once at wire-up time.  Gains live on
+        # the WB-specific sub-config; fall back to _DEFAULT_KP/_DEFAULT_KD
+        # if the blueprint didn't supply a wb_config.
+        n = len(self._joint_names)
+        wb = component.wb_config
+        kp_in = wb.kp if wb is not None else None
+        kd_in = wb.kd if wb is not None else None
+        if kp_in is not None:
+            if len(kp_in) != n:
+                raise ValueError(
+                    f"HardwareComponent '{component.hardware_id}': wb_config.kp length "
+                    f"{len(kp_in)} does not match joints length {n}"
+                )
+            self._kp = list(kp_in)
+        else:
+            self._kp = [_DEFAULT_KP] * n
+        if kd_in is not None:
+            if len(kd_in) != n:
+                raise ValueError(
+                    f"HardwareComponent '{component.hardware_id}': wb_config.kd length "
+                    f"{len(kd_in)} does not match joints length {n}"
+                )
+            self._kd = list(kd_in)
+        else:
+            self._kd = [_DEFAULT_KD] * n
+        self._kp_by_name = dict(zip(self._joint_names, self._kp, strict=False))
+        self._kd_by_name = dict(zip(self._joint_names, self._kd, strict=False))
+
         self._last_commanded: dict[str, float] = {}
         self._initialized = False
         self._warned_unknown_joints: set[str] = set()
@@ -361,10 +417,13 @@ class ConnectedWholeBody(ConnectedHardware):
         }
 
     def write_command(self, commands: dict[str, float], mode: ControlMode) -> bool:
-        """Write position commands — converts to MotorCommand with PD gains.
+        """Write position commands — converts to MotorCommand with per-joint PD gains.
 
         Only POSITION / SERVO_POSITION are supported; other modes are warned
         and dropped (matches ConnectedHardware's warn-and-skip pattern).
+        Per-joint kp/kd come from ``component.wb_config`` (resolved in
+        ``__init__``); fall back to ``_DEFAULT_KP``/``_DEFAULT_KD`` when
+        the blueprint didn't supply gains.
         """
         from dimos.hardware.whole_body.spec import MotorCommand
 
@@ -392,8 +451,8 @@ class ConnectedWholeBody(ConnectedHardware):
             MotorCommand(
                 q=self._last_commanded[name],
                 dq=0.0,
-                kp=_DEFAULT_KP,
-                kd=_DEFAULT_KD,
+                kp=self._kp_by_name[name],
+                kd=self._kd_by_name[name],
                 tau=0.0,
             )
             for name in self._joint_names
@@ -413,10 +472,3 @@ class ConnectedWholeBody(ConnectedHardware):
             self._last_commanded[name] = states[i].q
         self._initialized = True
         return True
-
-
-__all__ = [
-    "ConnectedHardware",
-    "ConnectedTwistBase",
-    "ConnectedWholeBody",
-]

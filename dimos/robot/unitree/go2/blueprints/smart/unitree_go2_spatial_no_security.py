@@ -22,8 +22,8 @@ spatial blueprint intact.
 """
 
 from dimos.core.coordination.blueprints import autoconnect
-from dimos.perception.perceive_loop_skill import PerceiveLoopSkill
-from dimos.perception.spatial_perception import SpatialMemory
+from dimos.perception.experimental.perceive_loop_skill import PerceiveLoopSkill
+from dimos.perception.experimental.spatial_perception import SpatialMemory
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2 import unitree_go2
 
 unitree_go2_spatial_no_security = autoconnect(
