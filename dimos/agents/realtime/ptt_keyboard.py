@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from pynput.keyboard import Key, KeyCode, Listener
+from pynput.keyboard import Key, KeyCode, Listener  # type: ignore[import-untyped]
 
 from dimos.core.core import rpc
 from dimos.core.module import Module
@@ -89,9 +89,9 @@ def _key_to_name(key: Any) -> str:
     callbacks. We normalise to the same string form used by ``_parse_key``.
     """
     if isinstance(key, Key):
-        return key.name
+        return str(key.name)
     if isinstance(key, KeyCode) and key.char is not None:
-        return key.char.lower()
+        return str(key.char).lower()
     return ""
 
 

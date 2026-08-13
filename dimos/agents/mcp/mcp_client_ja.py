@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages.base import BaseMessage
 from langchain_core.tools import StructuredTool
@@ -136,7 +136,7 @@ class TimedMcpClient(McpClient):
             # Stream sentences out of LLM token chunks as soon as they form,
             # so the TTS node can start on sentence 1 before the turn ends.
             if mode == "messages":
-                chunk, meta = payload
+                chunk, meta = cast("tuple[Any, Any]", payload)
                 node = meta.get("langgraph_node") if isinstance(meta, dict) else None
                 if node in llm_nodes:
                     # Assumes str-content deltas (OpenAI-compatible chat
@@ -152,7 +152,7 @@ class TimedMcpClient(McpClient):
             if mode != "updates":
                 continue
 
-            update = payload
+            update = cast("dict[str, Any]", payload)
             for node_name, node_output in update.items():
                 elapsed = time.perf_counter() - step_t0
                 msgs = node_output.get("messages", []) if isinstance(node_output, dict) else []

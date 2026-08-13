@@ -24,6 +24,7 @@ publishes the raw audio stream and the typed-text /human_input.
 from __future__ import annotations
 
 from threading import Thread
+from typing import Any
 
 import reactivex as rx
 
@@ -42,9 +43,9 @@ class WebInputAudioOnly(WebInput):
     """WebInput exposing web_audio (no STT). Typed text still flows via
     /human_input through the existing query_stream subscription."""
 
-    _audio_subject: rx.subject.Subject
+    _audio_subject: rx.subject.Subject[Any]
     _web_interface: RobotWebInterface
-    _human_transport: pLCMTransport
+    _human_transport: pLCMTransport[Any]
     _thread: Thread
 
     web_audio: Out[AudioEvent]

@@ -70,7 +70,7 @@ class VadStreamSegmenter:
         vad mode is actually selected.
         """
         try:
-            from silero_vad import VADIterator, load_silero_vad
+            from silero_vad import VADIterator, load_silero_vad  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
             raise RuntimeError(
                 "mic_mode='vad' requires the silero-vad package. "
