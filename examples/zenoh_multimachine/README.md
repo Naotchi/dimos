@@ -15,9 +15,22 @@ python run_ping.py --count 200 --rate 20 --image
 ```
 
 - 同一ホストならデフォルト設定で 2 プロセスがつながる(loopback scouting)。
-- マシンをまたぐ場合は両側で `DIMOS_ZENOH_SCOUTING=true`(LAN multicast)、
-  または zenoh router を立てて両側 `ROBOT_IP=<router-ip>`。
-- `DIMOS_TRANSPORT` はスクリプトが `zenoh` を設定する(env で上書き可能)。
+- マシンをまたぐ場合は両側で `ZENOH_SCOUTING=true`(LAN multicast)。
+  multicast が通らないネットワークでは zenoh router を gossip ハブとして立てて
+  両側 `ROBOT_IP=<router-ip> ZENOH_SCOUTING=true`。
+- env 名は prefix なし(`ZENOH_SCOUTING`、`ROBOT_IP`)。`DIMOS_` prefix が
+  効くのは `DIMOS_TRANSPORT` のみ(スクリプトが `zenoh` を設定、env で上書き可能)。
+
+## Docker 2 コンテナでの検証
+
+```bash
+./container_test.sh            # 同一 network、multicast scouting
+./container_test.sh router     # zenohd router + gossip 発見
+```
+
+ホストの repo / venv / uv Python を read-only マウントするのでイメージビルドは
+不足 so ライブラリの追加のみ(`Dockerfile`、初回に自動ビルド)。docker グループ
+権限が必要。
 
 ## ファイル
 
