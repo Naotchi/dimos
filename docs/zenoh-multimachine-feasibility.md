@@ -133,7 +133,44 @@ zenoh 1.9 では旧 `peers_failover_brokering` 設定が廃止されている(DE
 
 **peer モードのデータは router を経由しない(設定でも変えられない)** が確定。
 
-## クラウド(Azure VM)⇔ NAT 裏マシンのトポロジ検討
+## 標準モジュールによるオフロード検証(2026-08-25、Docker 2 コンテナ)
+
+独自 PoC モジュール(ping/pong)ではなく、**dimos 標準搭載モジュールだけ**で
+「エッジ → クラウド」オフロードの縮小版を構成し、コンテナ間で動作することを確認した。
+
+| 側 | 内容 |
+|---|---|
+| コンテナ A(エッジ役) | 標準 CLI そのまま: `dimos --transport zenoh --replay --replay-db /tmp/go2_short.db --viewer none run unitree-go2-basic`(GO2Connection が replay データから `lidar` / `odom` / `color_image` / `tf` を publish。実機・GPU 不要) |
+| コンテナ B(クラウド役) | 標準モジュール **VoxelGridMapper(device=CPU:0)→ CostMapper** を `run_mapping_offload.py` で起動 |
+| 境界を越えるストリーム | `lidar`(PointCloud2、A→B)。B 内で `global_map` → `global_costmap`(OccupancyGrid)を生成 |
+
+**結果: ✅ PASS** — B 側プローブで lidar 受信・costmap 生成を確認
+(`./container_offload_test.sh`、zenoh scouting モード)。
+ホスト上の 2 プロセス版でも同様に PASS(lidar 41 受信 / costmap 4 枚)。
+
+### この検証で判明した注意点
+
+- **replay はループしない**: `go2_short` は約 60 秒の素材(lidar 7.7Hz / odom 18.7Hz /
+  color_image 14.3Hz)で、CLI 経由の `ReplayConnection` は `loop=False` 固定。
+  **受信側を先に起動してからロボット側を起動する**手順が必須(スクリプトはこの順序)。
+- **Coordinator RPC は 1 バスに 1 つ**: 2 つ目の dimos インスタンスで
+  `start_rpc_service()` を呼ぶと「another Coordinator service is already running on
+  the zenoh bus」で失敗する。分割構成では片側(基本はロボット側 = CLI 起動側)だけが
+  RPC サービスを持つ。マルチマシン設計時の重要な制約
+  (対策候補: `Blueprint.namespace()` で分離)。
+- **venv の numpy が 2.5.1 に手動更新されており numba 0.66 と非互換**だった
+  (mapping モジュールの import で失敗)。lockfile 準拠の 2.4.6 へ戻して解決。
+  なお `uv pip install` はリポジトリ内で実行すると pyproject の
+  `tool.uv.override-dependencies`(`numpy>=2`)に上書きされるため、
+  リポジトリ外の cwd から実行する必要がある。
+- コンテナの read-only リポジトリマウントでは sqlite replay DB を開けないため、
+  コンテナ内で `/tmp` にコピーして絶対パス指定(`--replay-db /tmp/go2_short.db`)。
+- 標準スタックのコンテナ実行に必要な追加 so: `libportaudio2 libsndfile1
+  libturbojpeg`(Dockerfile に追加済み)。
+- VoxelGridMapper のデフォルト device は `CUDA:0`。GPU なし環境では
+  `device="CPU:0"` を blueprint 引数で指定する。
+
+## クラウド(Azure VM → 中止、docomo MEC へ)⇔ NAT 裏マシンのトポロジ検討
 
 物理マシンが NAT 裏にある場合、到達性は「物理 → VM パブリック IP」の片方向のみ。
 このとき:

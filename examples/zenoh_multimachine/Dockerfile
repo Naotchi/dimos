@@ -5,4 +5,5 @@ FROM ubuntu:22.04
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libglib2.0-0 libpcre3 libgl1 libegl1 libgomp1 libx11-6 \
+        libportaudio2 libsndfile1 libturbojpeg \
     && rm -rf /var/lib/apt/lists/*
