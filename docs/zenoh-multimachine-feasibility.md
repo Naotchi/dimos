@@ -210,6 +210,44 @@ Compute E、低遅延が売り)。この文脈では:
 - Azure VM 検証は MEC 前の予行という位置づけ。Azure では手軽な方法で通し、
   本番 MEC で閉域到達性を本命にする。
 
+## 通信アーキテクチャの整理: 発見方式とデータ経路
+
+dimos の zenoh transport は**ブローカーレスの P2P(peer 型)**として動作する。
+アーキテクチャを理解する上では「ピアの発見(discovery)」と「データ配送
+(data plane)」を分けて捉える必要がある。
+
+- **データ配送**: 常にピア間の直接 TCP(ユニキャスト)。multicast も router も
+  データ経路には関与しない。
+- **発見**: multicast スカウティング(同一 L2 限定)と、router を介した gossip
+  (WAN/キャリア網でも可)の 2 方式があり、環境に応じて選択する。
+- zenoh には全データを router 経由で配送する client モードも存在するが、dimos は
+  peer 型固定であり選択できない(`ZenohConfig.mode = "peer"`、
+  `dimos/protocol/service/zenohservice.py:101`)。
+
+構成としては次の 3 パターンが考えられ、特性は以下のとおり:
+
+| 観点 | ① multicast 発見 + peer 配送 | ② router gossip 発見 + peer 配送(デモ採用) | ③ client(router 配送) |
+|---|---|---|---|
+| 動く条件 | 同一 LAN + multicast 許可。SIM⇔MEC では不可 | router に TCP 一本 + ピア間 TCP 到達性 | router に TCP 一本のみ(NAT 裏でも可) |
+| データ経路 | ピア直結 | ピア直結 | 全データ router 経由(+1 ホップ) |
+| 遅延の見え方 | 純粋な網 RTT | 純粋な網 RTT(「MEC が近い=速い」がそのまま出る) | router 処理時間が乗る |
+| router 障害時 | 影響なし | 確立済み通信は継続(新規参加のみ不可) | 全通信停止(単一障害点) |
+| FW 設定 | multicast + エフェメラル TCP | 7447 + エフェメラル TCP | 7447 のみ |
+| 会場での混線 | 同一 LAN の他 zenoh を勝手に発見するリスク | 意図した router 経由のみ | 同左 |
+
+実装上の対応箇所(すべて `dimos/protocol/service/zenohservice.py`):
+
+- peer 固定: `ZenohConfig.mode = "peer"`(L101。client を選ぶ設定経路は無い)
+- 発見の切替: `ZenohSessionPool.acquire`(L123〜)—
+  `scouting=false`(デフォルト)は multicast を loopback 限定 + gossip 無効、
+  `ZENOH_SCOUTING=true` で LAN multicast + gossip の両方が有効
+- router へのダイヤル: `_default_connect_endpoints`(L46〜)—
+  `ROBOT_IP` を `tcp/<ip>:7447` の connect endpoint に変換(router の役目は発見まで)
+
+同ファイルのコメント "peers don't route each other's traffic" が
+「peer はデータを中継しない」仕様の upstream 側の明記。分離ネットワークでの
+実測(前掲マトリクス)とも一致する。
+
 ## 実 2 マシン検証ランブック(月曜実施用)
 
 前提: 両マシンとも本ブランチを checkout し、venv に `eclipse-zenoh==1.9.0` が
